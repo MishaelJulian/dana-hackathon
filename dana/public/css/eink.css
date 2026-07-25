@@ -1,0 +1,294 @@
+/* ============================================================
+   eink.css — E-ink reading mode
+   Monochrome, high contrast, sharp type, minimal screen-draw
+   For outdoor daylight legibility, battery economy, and
+   a "book not feed" feel.
+   ============================================================ */
+
+/* --- E-ink mode activation --- */
+/* Applied to the body when the user enters reading mode */
+body.eink-mode {
+  background: var(--eink-bg) !important;
+  color: var(--eink-fg) !important;
+}
+
+body.eink-mode .nav {
+  background: var(--eink-bg);
+  border-bottom-color: var(--eink-border);
+}
+
+body.eink-mode .reading__sidebar {
+  background: var(--eink-bg);
+  border-inline-start-color: var(--eink-border);
+}
+
+body.eink-mode .reading__list li:hover {
+  background: var(--eink-fg);
+  color: var(--eink-bg);
+}
+
+body.eink-mode .reading__list li[aria-selected="true"] {
+  background: var(--eink-fg);
+  color: var(--eink-bg);
+}
+
+/* --- Typography for E-ink --- */
+body.eink-mode {
+  font-family: var(--font-persian);
+  font-size: 18px;
+  line-height: 1.8;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body.eink-mode h1,
+body.eink-mode h2,
+body.eink-mode h3 {
+  color: var(--eink-fg);
+  font-weight: 700;
+}
+
+body.eink-mode h1 {
+  font-size: 1.75rem;
+  margin-bottom: var(--space-5);
+  border-bottom: 2px solid var(--eink-fg);
+  padding-bottom: var(--space-3);
+}
+
+body.eink-mode h2 {
+  font-size: 1.4rem;
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-4);
+}
+
+body.eink-mode h3 {
+  font-size: 1.2rem;
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-3);
+}
+
+body.eink-mode p {
+  margin-bottom: var(--space-4);
+  text-align: justify;
+  hyphens: auto;
+}
+
+/* --- Links in E-ink mode --- */
+body.eink-mode a {
+  color: var(--eink-fg);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+
+body.eink-mode a:hover {
+  background: var(--eink-fg);
+  color: var(--eink-bg);
+}
+
+/* --- Images in E-ink mode --- */
+body.eink-mode img {
+  max-width: 100%;
+  height: auto;
+  filter: grayscale(100%) contrast(1.2);
+  border: 1px solid var(--eink-fg);
+}
+
+/* --- Tables in E-ink mode --- */
+body.eink-mode table {
+  border: 1px solid var(--eink-fg);
+}
+
+body.eink-mode th,
+body.eink-mode td {
+  border: 1px solid var(--eink-fg);
+  padding: var(--space-2) var(--space-3);
+}
+
+body.eink-mode th {
+  background: var(--eink-fg);
+  color: var(--eink-bg);
+  font-weight: 700;
+}
+
+body.eink-mode tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* --- Blockquotes in E-ink mode --- */
+body.eink-mode blockquote {
+  border-inline-start: 3px solid var(--eink-fg);
+  padding-inline-start: var(--space-4);
+  margin: var(--space-4) 0;
+  font-style: italic;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+/* --- Code in E-ink mode --- */
+body.eink-mode code {
+  font-family: var(--font-mono);
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-size: 0.9em;
+}
+
+body.eink-mode pre {
+  background: var(--eink-fg);
+  color: var(--eink-bg);
+  padding: var(--space-4);
+  border-radius: 4px;
+  overflow-x: auto;
+  direction: ltr;
+  text-align: left;
+}
+
+body.eink-mode pre code {
+  background: none;
+  padding: 0;
+}
+
+/* --- Hashtiyeh (marginalia) in E-ink mode --- */
+body.eink-mode .hashtiyeh {
+  border: 1px solid var(--eink-fg);
+  border-radius: 4px;
+  padding: var(--space-3);
+  margin: var(--space-4) 0;
+  background: rgba(0, 0, 0, 0.02);
+  font-size: 0.9rem;
+}
+
+body.eink-mode .hashtiyeh__header {
+  font-weight: 700;
+  border-bottom: 1px solid var(--eink-fg);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+body.eink-mode .hashtiyeh__note {
+  margin-bottom: var(--space-2);
+}
+
+body.eink-mode .hashtiyeh__chain {
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.6);
+  margin-top: var(--space-3);
+}
+
+/* --- Reading content in E-ink mode --- */
+body.eink-mode .reading__content {
+  padding: var(--space-5) var(--space-6);
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+/* --- Claims verification in E-ink mode --- */
+body.eink-mode .claim {
+  border: 2px solid var(--eink-fg);
+  background: transparent;
+}
+
+body.eink-mode .claim__verdict {
+  border: 1px solid var(--eink-fg);
+  background: transparent;
+}
+
+body.eink-mode .claim__verdict--caught {
+  border-width: 2px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+body.eink-mode .article__verification {
+  border-top-color: var(--eink-fg);
+}
+
+/* --- Hashtiyeh panel in E-ink mode --- */
+body.eink-mode .hashtiyeh-panel {
+  background: var(--eink-bg);
+  border-inline-start-color: var(--eink-fg);
+}
+
+body.eink-mode .hashtiyeh__annotation {
+  border-color: var(--eink-fg);
+  background: transparent;
+}
+
+body.eink-mode .hashtiyeh__annotation-selected {
+  border-inline-start-color: var(--eink-fg);
+}
+
+body.eink-mode .hashtiyeh__input {
+  background: var(--eink-bg);
+  border-color: var(--eink-fg);
+}
+
+body.eink-mode .hashtiyeh__type-btn {
+  border-color: var(--eink-fg);
+}
+
+body.eink-mode .hashtiyeh__type-btn--active {
+  background: var(--eink-fg);
+  color: var(--eink-bg);
+}
+
+body.eink-mode .btn--hashtiyeh {
+  background: var(--eink-fg);
+  color: var(--eink-bg);
+}
+
+/* --- Onboarding in E-ink mode --- */
+body.eink-mode .onboarding__progress {
+  background: var(--eink-fg);
+}
+
+body.eink-mode .onboarding__progress-bar {
+  background: var(--eink-bg);
+  border: 1px solid var(--eink-fg);
+}
+
+body.eink-mode .onboarding__input {
+  border-color: var(--eink-fg);
+  background: var(--eink-bg);
+}
+
+body.eink-mode .onboarding__option {
+  border-color: var(--eink-fg);
+}
+
+body.eink-mode .onboarding__option--selected {
+  background: var(--eink-fg);
+  color: var(--eink-bg);
+}
+
+body.eink-mode .onboarding__room {
+  border: 2px solid var(--eink-fg);
+  background: transparent;
+}
+
+/* --- Reduce screen-draw --- */
+/* E-ink screens refresh slowly. Minimise animations. */
+body.eink-mode *,
+body.eink-mode *::before,
+body.eink-mode *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* --- Print styles (similar to E-ink) --- */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  .nav,
+  .reading__sidebar,
+  .btn,
+  .hashtiyeh__actions {
+    display: none !important;
+  }
+
+  .reading__content {
+    max-width: 100%;
+    padding: 0;
+  }
+}

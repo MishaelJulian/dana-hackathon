@@ -1,0 +1,114 @@
+/* ============================================================
+   rtl.css — Right-to-Left layout support
+   Persian (fa) is the default direction
+   ============================================================ */
+
+/* Base RTL — the entire app is RTL-first */
+html[dir="rtl"] {
+  text-align: right;
+}
+
+/* --- Logical properties (direction-agnostic) --- */
+/* Use inline-start/end instead of left/right */
+
+/* Navigation */
+.nav {
+  padding-inline: var(--space-4);
+}
+
+/* Reading sidebar — RTL: sidebar on the right */
+.reading__sidebar {
+  border-inline-end: none;
+  border-inline-start: 1px solid var(--color-grey);
+}
+
+/* Reading content padding */
+.reading__content {
+  padding-inline: var(--space-5);
+}
+
+/* --- Bidirectional text handling --- */
+/* Persian text mixed with Latin (e.g., "kiwix-js", "ZIM") */
+bdi, [dir="ltr"] {
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+
+/* Inline Latin text within Persian paragraphs */
+.latin {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* --- Digit forms --- */
+/* Persian digits (۰۱۲۳۴۵۶۷۸۹) for in-app numbers */
+.digits-persian {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- ZWNJ handling --- */
+/* Zero-Width Non-Joiner (U+200C) is load-bearing in Persian.
+   It appears in ~1-2% of all characters.
+   Examples: کتاب‌خانه (ketāb-khāne), خانه‌ها (houses)
+
+   CSS does not need to do anything special — the browser handles
+   ZWNJ correctly IF:
+   1. The text is stored with correct U+200C characters
+   2. The font supports Persian joining behavior
+   3. The text direction is set to RTL
+
+   Verify rendering at E-ink DPI — thin strokes + tight joins may
+   cause ZWNJ to be invisible on low-resolution screens. */
+
+/* --- Mixed-direction lists --- */
+.reading__list li {
+  text-align: start;
+}
+
+/* --- Search input --- */
+.search-input {
+  text-align: start;
+}
+
+/* --- Scrollbar direction --- */
+.reading__sidebar::-webkit-scrollbar,
+.reading__content::-webkit-scrollbar {
+  /* Scrollbar remains on the left in RTL (browser default) */
+}
+
+/* --- Table alignment --- */
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th, td {
+  text-align: start;
+  padding: var(--space-2) var(--space-3);
+}
+
+/* --- Code blocks (always LTR) --- */
+code, pre, .code-block {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}
+
+/* --- Images with captions --- */
+figure {
+  text-align: center;
+}
+
+figcaption {
+  text-align: start;
+  font-size: 0.9rem;
+  color: var(--color-dim);
+}
+
+/* --- LTR override class --- */
+/* Apply to any element that must be LTR regardless of page direction */
+.force-ltr {
+  direction: ltr !important;
+  unicode-bidi: bidi-override !important;
+  text-align: left !important;
+}
