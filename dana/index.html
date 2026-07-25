@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1A1A1A">
+  <meta name="description" content="Dana — offline knowledge sanctuary">
+
+  <title>Dana | دانا</title>
+
+  <!-- Fonts: Vazirmatn (Persian), Sahel (fallback), Georgia (English) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- App styles -->
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/rtl.css">
+  <link rel="stylesheet" href="/css/eink.css">
+  <link rel="stylesheet" href="/css/palace.css">
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="/manifest.json">
+</head>
+<body>
+  <!-- App shell -->
+  <div id="app">
+    <!-- Navigation -->
+    <nav id="main-nav" class="nav" role="navigation" aria-label="منوی اصلی">
+      <button class="nav__back" id="btn-back" aria-label="بازگشت" hidden>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M15 18l-6-6 6-6"/>
+        </svg>
+      </button>
+      <h1 class="nav__title">دانا</h1>
+      <button class="nav__menu" id="btn-menu" aria-label="منو">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 12h18M3 6h18M3 18h18"/>
+        </svg>
+      </button>
+    </nav>
+
+    <!-- Main content area -->
+    <main id="main-content" class="content">
+      <!-- Onboarding screen -->
+      <section id="screen-onboarding" class="screen">
+        <div id="onboarding-container" class="onboarding-container">
+          <!-- Rendered by OnboardingUI -->
+        </div>
+      </section>
+
+      <!-- Landing screen -->
+      <section id="screen-landing" class="screen screen--active">
+        <div class="landing">
+          <div class="landing__garden">
+            <!-- Garden will render here -->
+            <div class="garden-state" id="garden-state">
+              <div class="garden__ground"></div>
+            </div>
+          </div>
+
+          <div class="landing__hafez">
+            <!-- Hafez figure placeholder -->
+            <div class="hafez-figure" aria-hidden="true"></div>
+          </div>
+
+          <div class="landing__actions">
+            <button class="btn btn--primary" id="btn-open-reader" aria-label="باز کردن کتابخانه">
+              <span class="btn__icon">📖</span>
+              <span class="btn__label">کتابخانه</span>
+            </button>
+            <button class="btn btn--secondary" id="btn-open-palace" aria-label="ورود به کاخ ذهن">
+              <span class="btn__icon">🏛️</span>
+              <span class="btn__label">کاخ ذهن</span>
+            </button>
+            <button class="btn btn--secondary" id="btn-open-jester" aria-label="گفتگو با وکیل">
+              <span class="btn__icon">⚖️</span>
+              <span class="btn__label">وکیل</span>
+            </button>
+          </div>
+
+          <p class="landing__tagline">راه‌آموز</p>
+        </div>
+      </section>
+
+      <!-- Reading screen (E-ink mode) -->
+      <section id="screen-reading" class="screen">
+        <div class="reading" role="article" aria-label="مطالعه">
+          <!-- Article list / search -->
+          <div class="reading__sidebar" id="reading-sidebar">
+            <div class="reading__courses" id="course-filters">
+              <button class="btn btn--course btn--course-active" data-course="all">همه</button>
+              <button class="btn btn--course" data-course="nature">🌿 طبیعت</button>
+              <button class="btn btn--course" data-course="digital-literacy">📱 رسانه</button>
+              <button class="btn btn--course" data-course="mathematics">🔢 ریاضی</button>
+            </div>
+            <div class="reading__search">
+              <input type="search" id="search-input" class="search-input" placeholder="جستجو..." aria-label="جستجوی مقالات">
+            </div>
+            <ul class="reading__list" id="article-list" role="listbox">
+              <!-- Articles loaded here -->
+            </ul>
+          </div>
+
+          <!-- Article content -->
+          <div class="reading__content" id="reading-content">
+            <div class="reading__placeholder">
+              <p>یک مقاله انتخاب کنید</p>
+            </div>
+          </div>
+
+          <!-- Hashtiyeh marginalia panel -->
+          <aside class="hashtiyeh-panel" id="hashtiyeh-panel" aria-label="حاشیه‌نویسی">
+            <!-- Rendered by HashtiyehUI -->
+          </aside>
+        </div>
+      </section>
+
+      <!-- Palace screen (3D mode) -->
+      <section id="screen-palace" class="screen">
+        <div class="palace">
+          <canvas id="palace-canvas" class="palace__canvas"></canvas>
+          <div class="palace__overlay" id="palace-overlay">
+            <div class="palace__room-label" id="palace-room-label">کاخ ذهن</div>
+            <div class="palace__node-info" id="palace-node-info" hidden>
+              <p class="palace__node-name" id="palace-node-name"></p>
+              <button class="btn btn--primary btn--sm" id="btn-enter-node">ورود</button>
+            </div>
+            <p class="palace__nav-hint" id="palace-nav-hint">بکشید برای چرخش، روی گره‌ها کلیک کنید</p>
+          </div>
+          <div class="palace__loading" id="palace-loading">
+            <p>در حال بارگذاری کاخ ذهن...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Jester encounter screen -->
+      <section id="screen-jester" class="screen">
+        <div class="jester" role="dialog" aria-label="گفتگو با وکیل">
+          <div class="jester__header">
+            <h2>وکیل</h2>
+            <p class="jester__subtitle">قدرت پیشنهاد، ضعف در پاسخ</p>
+          </div>
+          <!-- Encounter selection -->
+          <div class="jester__select" id="jester-select">
+            <p class="jester__select-label">موضوع گفتگو را انتخاب کن:</p>
+            <div class="jester__encounters" id="jester-encounters">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+          <!-- Dialogue area (hidden until encounter starts) -->
+          <div class="jester__dialogue" id="jester-dialogue" hidden>
+            <!-- Dialogue bubbles -->
+          </div>
+          <div class="jester__actions" id="jester-actions" hidden>
+            <!-- Response buttons -->
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- App scripts -->
+  <script type="module" src="/src/core/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then((reg) => {
+        console.log('[Dana] Service Worker registered:', reg.scope);
+      }).catch((err) => {
+        console.warn('[Dana] Service Worker registration failed:', err);
+      });
+    }
+  </script>
+</body>
+</html>

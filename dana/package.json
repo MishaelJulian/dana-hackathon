@@ -1,0 +1,20 @@
+{
+  "name": "dana",
+  "version": "0.1.0",
+  "description": "Offline-first, culturally-rooted knowledge sanctuary for youth in blockaded regions",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0",
+    "puppeteer": "^25.3.0",
+    "vite": "^5.4.0"
+  }
+}
