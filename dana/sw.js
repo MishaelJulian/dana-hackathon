@@ -4,7 +4,7 @@
  * ZIM files are large and loaded separately via fetch (not cached in SW)
  */
 
-const CACHE_NAME = 'dana-v1';
+const CACHE_NAME = 'dana-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -15,6 +15,8 @@ const STATIC_ASSETS = [
   '/css/palace.css',
   '/src/core/app.js',
   '/src/core/router.js',
+  '/src/core/i18n.js',
+  '/src/core/darkmode.js',
   '/src/features/reading/reader.js',
   '/src/features/reading/eink.js',
   '/src/features/reading/reading-screen.js',
@@ -58,6 +60,14 @@ self.addEventListener('fetch', (event) => {
 
   // Skip non-GET requests
   if (request.method !== 'GET') return;
+
+  // Skip Vite dev server requests (HMR, dep optimization, etc.)
+  if (url.searchParams.has('v') || url.pathname.includes('/.vite/')) {
+    return;
+  }
+
+  // Skip chrome-extension and other non-http schemes
+  if (!url.protocol.startsWith('http')) return;
 
   // ZIM files: network-first (large, not cached in SW)
   if (url.pathname.endsWith('.zim')) {
