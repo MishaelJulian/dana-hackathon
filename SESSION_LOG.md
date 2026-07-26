@@ -17,7 +17,7 @@
 - (none)
 
 ### Next Task
-- Git commit (Task 5)
+- (none — all tasks complete)
 
 ### Known Bugs
 - (none)
@@ -36,6 +36,97 @@
 - Touch targets: ✅ all ≥ 48px
 - RTL: ✅ logical properties used
 - E-ink mode: ✅ styled
+
+### Git Commit
+- 774532e — pushed to https://github.com/MishaelJulian/dana-hackathon.git
+
+---
+
+## Session: 008
+- **Date**: 2026-07-25 13:00
+- **Sprint**: Git commit and push
+- **Duration**: ~5 min
+
+### Completed
+- Initialized git repository in project root
+- Created `.gitignore` (node_modules, dist, OS files, .env, large files)
+- Committed all project files (43 files, 10,919 lines)
+- Pushed to https://github.com/MishaelJulian/dana-hackathon.git
+
+### In Progress
+- (none)
+
+### Next Task
+- (none — MVP complete)
+
+### Known Bugs
+- (none)
+
+### Architecture Decisions
+- (none)
+
+### Files Changed
+- `.gitignore` (created)
+
+### Build Status
+- Build: ✅ compiles
+- Git: ✅ committed and pushed
+
+### Git Commit
+- 774532e — feat: Dana hackathon MVP — offline-first knowledge sanctuary
+
+---
+
+## Session: 009
+- **Date**: 2026-07-25 13:30
+- **Sprint**: Language toggle + dark mode
+- **Duration**: ~15 min
+
+### Completed
+- Created `dana/src/core/i18n.js` — Persian/English translation system
+  - 60+ translated strings across all UI sections
+  - `t()` function for accessing translations
+  - `toggleLang()` with localStorage persistence
+  - RTL/LTR direction switching
+- Created `dana/src/core/darkmode.js` — dark mode toggle
+  - CSS variable overrides for dark palette
+  - localStorage persistence
+- Updated `dana/index.html` — added lang/theme toggle buttons to nav
+- Updated `dana/public/css/main.css` — dark mode variables, toggle button styles
+- Updated `dana/src/core/app.js` — integrated i18n and darkmode modules
+  - `updateUITranslations()` for dynamic string updates
+  - `updateLangButton()` / `updateThemeButton()` for toggle state
+  - All UI strings now use `t()` function
+- Build verified — compiles cleanly (77KB main + 688KB Three.js)
+
+### In Progress
+- (none)
+
+### Next Task
+- (none)
+
+### Known Bugs
+- (none)
+
+### Architecture Decisions
+- Translations stored in a single `i18n.js` module (not separate files per language)
+- Dark mode uses CSS variable overrides (not separate stylesheet)
+- Both preferences persist in localStorage
+- Language toggle switches direction (RTL ↔ LTR) automatically
+
+### Files Changed
+- `dana/src/core/i18n.js` (created)
+- `dana/src/core/darkmode.js` (created)
+- `dana/index.html` (toggle buttons)
+- `dana/public/css/main.css` (dark mode, toggle styles)
+- `dana/src/core/app.js` (i18n/darkmode integration)
+
+### Build Status
+- Build: ✅ compiles (77KB main + 688KB Three.js code-split)
+- Language toggle: ✅ Persian ↔ English
+- Dark mode: ✅ light ↔ dark
+- RTL/LTR: ✅ switches with language
+- Persistence: ✅ localStorage
 
 ### Git Commit
 - uncommitted

@@ -11,6 +11,8 @@ import { Garden } from '../features/garden/garden.js';
 import { HashtiyehUI } from '../features/hashtiyeh/hashtiyeh-ui.js';
 import { OnboardingUI } from '../features/onboarding/onboarding-ui.js';
 import { Palace } from '../features/palace/palace.js';
+import { t, getLang, toggleLang, initLang } from './i18n.js';
+import { toggleTheme, initTheme } from './darkmode.js';
 
 class DanaApp {
   constructor() {
@@ -28,10 +30,15 @@ class DanaApp {
   }
 
   async init() {
+    initLang();
+    initTheme();
+
     await this.initZimReader();
     this.setupNavigation();
+    this.setupToggles();
     this.setupReadingScreen();
     this.setupHashtiyeh();
+    this.updateUITranslations();
 
     this.router.register('landing', () => this.showScreen('screen-landing'));
     this.router.register('reading', () => this.showScreen('screen-reading'));
@@ -67,6 +74,100 @@ class DanaApp {
     btnOpenReader?.addEventListener('click', () => this.router.navigate('reading'));
     btnOpenPalace?.addEventListener('click', () => this.router.navigate('palace'));
     btnOpenJester?.addEventListener('click', () => this.router.navigate('jester'));
+  }
+
+  setupToggles() {
+    const btnLang = document.getElementById('btn-lang');
+    const btnTheme = document.getElementById('btn-theme');
+
+    btnLang?.addEventListener('click', () => {
+      toggleLang();
+      this.updateUITranslations();
+      this.updateLangButton();
+      // Re-render current screen content
+      if (this.currentArticle) {
+        this.selectArticle(this.currentArticle.id);
+      }
+    });
+
+    btnTheme?.addEventListener('click', () => {
+      const isDark = toggleTheme();
+      this.updateThemeButton();
+    });
+
+    this.updateLangButton();
+    this.updateThemeButton();
+  }
+
+  updateLangButton() {
+    const btnLang = document.getElementById('btn-lang');
+    if (btnLang) {
+      btnLang.textContent = t('lang.toggle');
+      btnLang.setAttribute('aria-label', getLang() === 'fa' ? 'Switch to English' : 'تغییر به فارسی');
+    }
+  }
+
+  updateThemeButton() {
+    const btnTheme = document.getElementById('btn-theme');
+    if (btnTheme) {
+      const isDark = document.documentElement.classList.contains('dark');
+      btnTheme.textContent = isDark ? '☀️' : '🌙';
+      btnTheme.setAttribute('aria-label', isDark ? 'Light mode' : 'حالت تاریک');
+    }
+  }
+
+  updateUITranslations() {
+    // Nav
+    const navTitle = document.getElementById('nav-title');
+    if (navTitle) navTitle.textContent = t('nav.title');
+
+    // Landing
+    const btnReader = document.getElementById('btn-open-reader');
+    const btnPalace = document.getElementById('btn-open-palace');
+    const btnJester = document.getElementById('btn-open-jester');
+    const tagline = document.querySelector('.landing__tagline');
+
+    if (btnReader) btnReader.querySelector('.btn__label').textContent = t('landing.library');
+    if (btnPalace) btnPalace.querySelector('.btn__label').textContent = t('landing.palace');
+    if (btnJester) btnJester.querySelector('.btn__label').textContent = t('landing.jester');
+    if (tagline) tagline.textContent = t('landing.tagline');
+
+    // Course filters
+    const courseFilters = document.querySelectorAll('.btn--course');
+    if (courseFilters.length >= 4) {
+      courseFilters[0].textContent = t('course.all');
+      courseFilters[1].textContent = t('course.nature');
+      courseFilters[2].textContent = t('course.digital');
+      courseFilters[3].textContent = t('course.math');
+    }
+
+    // Search
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) searchInput.placeholder = t('reading.search');
+
+    // Reading placeholder
+    const placeholder = document.querySelector('.reading__placeholder p');
+    if (placeholder) placeholder.textContent = t('reading.select');
+
+    // Jester
+    const jesterTitle = document.querySelector('.jester__header h2');
+    const jesterSubtitle = document.querySelector('.jester__subtitle');
+    const jesterSelectLabel = document.querySelector('.jester__select-label');
+    if (jesterTitle) jesterTitle.textContent = t('jester.title');
+    if (jesterSubtitle) jesterSubtitle.textContent = t('jester.subtitle');
+    if (jesterSelectLabel) jesterSelectLabel.textContent = t('jester.select');
+
+    // Palace
+    const palaceLabel = document.getElementById('palace-room-label');
+    const palaceHint = document.getElementById('palace-nav-hint');
+    const palaceLoading = document.querySelector('.palace__loading p');
+    if (palaceLabel) palaceLabel.textContent = t('landing.palace');
+    if (palaceHint) palaceHint.textContent = t('palace.hint');
+    if (palaceLoading) palaceLoading.textContent = t('palace.loading');
+
+    // Hashtiyeh
+    const btnHashtiyeh = document.getElementById('btn-toggle-hashtiyeh');
+    if (btnHashtiyeh) btnHashtiyeh.setAttribute('aria-label', t('hashtiyeh.label'));
   }
 
   setupReadingScreen() {
@@ -154,6 +255,16 @@ class DanaApp {
     // Initialise on first visit
     if (!this.palace.scene) {
       await this.palace.init(canvas);
+
+      // Check if init succeeded
+      if (!this.palace.scene) {
+        console.error('[Dana] Palace init failed');
+        if (loading) {
+          loading.innerHTML = '<p style="color: #c62828;">Failed to load 3D engine. Check console for details.</p>';
+        }
+        return;
+      }
+
       this.palace.loadRoom(this.palace.getSavedRoom());
 
       this.palace.onRoomChange = (course) => {
@@ -240,7 +351,7 @@ class DanaApp {
             <header class="article__header">
               <h1 class="article__title">${article.title}</h1>
               <div class="article__meta">
-                <span class="article__source">ویکی‌پدیای فارسی</span>
+                <span class="article__source">${t('reading.source')}</span>
               </div>
             </header>
 
@@ -251,16 +362,16 @@ class DanaApp {
             <footer class="article__footer">
               ${hasClaims ? `
                 <div class="article__verification">
-                  <p class="verification__prompt">آیا می‌توانی ادعاهای زیر را بررسی کنی؟</p>
+                  <p class="verification__prompt">${t('claim.prompt')}</p>
                   <div id="claims-container"></div>
-                  <button class="btn btn--verify" id="btn-verify-all" aria-label="بررسی همه ادعاها">
-                    <span>🔍</span> بررسی کن
+                  <button class="btn btn--verify" id="btn-verify-all" aria-label="${t('reading.verify.all')}">
+                    <span>🔍</span> ${t('reading.verify')}
                   </button>
                 </div>
               ` : `
                 <div class="article__verification">
-                  <button class="btn btn--verify" id="btn-verify" aria-label="بررسی ادعاها">
-                    <span>🔍</span> بررسی کن
+                  <button class="btn btn--verify" id="btn-verify" aria-label="${t('reading.verify')}">
+                    <span>🔍</span> ${t('reading.verify')}
                   </button>
                 </div>
               `}
@@ -293,13 +404,13 @@ class DanaApp {
 
     container.innerHTML = claims.map((claim, i) => `
       <div class="claim" data-index="${i}" id="claim-${i}">
-        <p class="claim__text"><strong>ادعا ${i + 1}:</strong> ${claim.text}</p>
+        <p class="claim__text"><strong>${t('claim.prefix')} ${i + 1}:</strong> ${claim.text}</p>
         <div class="claim__actions">
           <button class="btn btn--verify-correct btn--sm" data-action="correct" data-index="${i}">
-            ✅ درست است
+            ${t('claim.correct')}
           </button>
           <button class="btn btn--verify-wrong btn--sm" data-action="wrong" data-index="${i}">
-            ❌ نادرست است
+            ${t('claim.wrong')}
           </button>
         </div>
         <div class="claim__result" id="claim-result-${i}" hidden></div>
@@ -328,12 +439,16 @@ class DanaApp {
 
     const wasCaught = childSaysCorrect !== claim.correct;
 
+    const resultLabel = getLang() === 'en' ? 'Result:' : 'نتیجه:';
+    const sourceLabel = getLang() === 'en' ? 'Source:' : 'منبع:';
+    const correctText = claim.correct ? t('claim.correct') : t('claim.wrong');
+
     resultEl.hidden = false;
     resultEl.innerHTML = `
       <div class="claim__verdict ${wasCaught ? 'claim__verdict--caught' : ''}">
-        <p><strong>نتیجه:</strong> ${claim.correct ? '✅ این ادعا درست است' : '❌ این ادعا نادرست است'}</p>
-        <p><strong>منبع:</strong> ${claim.source}</p>
-        ${wasCaught && !claim.correct ? '<p class="claim__reward">🎉 آفرین! تو درست تشخیص دادی!</p>' : ''}
+        <p><strong>${resultLabel}</strong> ${correctText}</p>
+        <p><strong>${sourceLabel}</strong> ${claim.source}</p>
+        ${wasCaught && !claim.correct ? `<p class="claim__reward">${t('claim.reward')}</p>` : ''}
       </div>
     `;
 
@@ -375,8 +490,8 @@ class DanaApp {
     container.innerHTML = encounters.map(enc => `
       <button class="btn btn--encounter" data-encounter="${enc.id}">
         <span class="encounter__icon">⚖️</span>
-        <span class="encounter__topic">${enc.topic}</span>
-        <span class="encounter__count">${enc.exchanges.length} سوال</span>
+        <span class="encounter__topic">${getLang() === 'en' ? this.translateTopic(enc.topic) : enc.topic}</span>
+        <span class="encounter__count">${enc.exchanges.length} ${t('jester.questions')}</span>
       </button>
     `).join('');
 
@@ -404,11 +519,24 @@ class DanaApp {
     this.renderJesterExchange(encounter);
   }
 
+  translateTopic(topic) {
+    const topics = {
+      'گربه‌سانان ایران': 'Iranian big cats',
+      'ریاضیات': 'Mathematics',
+      'پرنده‌شناسی ایران': 'Iranian ornithology',
+      'سواد رسانه‌ای': 'Media literacy',
+      'هندسه و الگوها': 'Geometry & patterns',
+    };
+    return topics[topic] || topic;
+  }
+
   renderJesterExchange(exchange) {
     const dialogue = document.getElementById('jester-dialogue');
     const actions = document.getElementById('jester-actions');
 
     if (!dialogue || !actions) return;
+
+    const claimLabel = getLang() === 'en' ? 'Claim:' : 'ادعا:';
 
     dialogue.innerHTML = `
       <div class="dialogue__exchange">
@@ -419,17 +547,17 @@ class DanaApp {
           </div>
         </div>
         <div class="dialogue__claim">
-          <p><strong>ادعا:</strong> ${exchange.claim}</p>
+          <p><strong>${claimLabel}</strong> ${exchange.claim}</p>
         </div>
       </div>
     `;
 
     actions.innerHTML = `
       <button class="btn btn--verify-correct" id="btn-say-correct">
-        ✅ درست است
+        ${t('claim.correct')}
       </button>
       <button class="btn btn--verify-wrong" id="btn-say-wrong">
-        ❌ نادرست است
+        ${t('claim.wrong')}
       </button>
     `;
 
@@ -451,11 +579,14 @@ class DanaApp {
 
     if (!dialogue || !actions) return;
 
+    const resultLabel = getLang() === 'en' ? 'Result:' : 'نتیجه:';
+    const sourceLabel = getLang() === 'en' ? 'Source:' : 'منبع:';
+
     dialogue.innerHTML += `
       <div class="dialogue__exchange dialogue__exchange--response">
         <div class="dialogue__child">
           <div class="dialogue__bubble dialogue__bubble--child">
-            <p>${childSaysCorrect ? 'فکر می‌کنم درست است' : 'فکر می‌کنم نادرست است'}</p>
+            <p>${childSaysCorrect ? t('jester.yes') : t('jester.no')}</p>
           </div>
         </div>
         <div class="dialogue__jester">
@@ -465,8 +596,8 @@ class DanaApp {
           </div>
         </div>
         <div class="dialogue__verification">
-          <p><strong>نتیجه:</strong> ${result.verification.verdict}</p>
-          <p><strong>منبع:</strong> ${result.verification.found}</p>
+          <p><strong>${resultLabel}</strong> ${result.verification.verdict}</p>
+          <p><strong>${sourceLabel}</strong> ${result.verification.found}</p>
         </div>
       </div>
     `;
@@ -476,7 +607,7 @@ class DanaApp {
     if (result.isComplete) {
       actions.innerHTML = `
         <button class="btn btn--primary" id="btn-jester-done">
-          انتخاب موضوع دیگر
+          ${t('jester.done')}
         </button>
       `;
       document.getElementById('btn-jester-done')?.addEventListener('click', () => {
@@ -486,7 +617,7 @@ class DanaApp {
     } else if (result.nextExchange) {
       actions.innerHTML = `
         <button class="btn btn--primary" id="btn-jester-next">
-          سوال بعدی
+          ${t('jester.next')}
         </button>
       `;
       document.getElementById('btn-jester-next')?.addEventListener('click', () => {

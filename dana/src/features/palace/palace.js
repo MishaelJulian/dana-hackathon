@@ -94,7 +94,14 @@ export class Palace {
 
     // Lazy-load Three.js to keep initial bundle small
     if (!THREE) {
-      THREE = await import('three');
+      try {
+        console.log('[Palace] Loading Three.js...');
+        THREE = await import('three');
+        console.log('[Palace] Three.js loaded');
+      } catch (err) {
+        console.error('[Palace] Failed to load Three.js:', err);
+        return;
+      }
     }
 
     this.canvas = canvas;

@@ -63,6 +63,17 @@ body {
   --transition-normal: 300ms ease;
 }
 
+/* --- Dark mode --- */
+.dark {
+  --color-paper: #1A1A2E;
+  --color-ink: #E8E8E8;
+  --color-green: #4ECCA3;
+  --color-saffron: #FFD93D;
+  --color-grey: #3A3A5C;
+  --color-alt: #252540;
+  --color-dim: #9A9AB0;
+}
+
 /* --- Typography --- */
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-persian);
@@ -127,6 +138,33 @@ a {
   font-size: 1.25rem;
   font-weight: 700;
   color: var(--color-green);
+}
+
+.nav__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.nav__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--color-grey);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  cursor: pointer;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-family: var(--font-persian);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.nav__toggle:hover {
+  background: var(--color-alt);
+  border-color: var(--color-saffron);
 }
 
 .nav__back,
