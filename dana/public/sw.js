@@ -4,7 +4,15 @@
  * ZIM files are large and loaded separately via fetch (not cached in SW)
  */
 
-const CACHE_NAME = 'dana-v2';
+const CACHE_NAME = 'dana-v3';
+// Precache only paths stable across dev and a Vite production build (build
+// output hashes JS chunk filenames, so they can't be hardcoded here). JS/CSS
+// module chunks still end up offline-capable: the generic fetch handler
+// below caches every same-origin GET the first time it's fetched online, and
+// a normal app visit fetches every chunk it needs before the user ever goes
+// offline. ponytail: relies on cache-on-first-visit rather than a build-time
+// manifest plugin (e.g. vite-plugin-pwa) — upgrade to that if precache needs
+// to survive without a full first visit.
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -13,22 +21,12 @@ const STATIC_ASSETS = [
   '/css/rtl.css',
   '/css/eink.css',
   '/css/palace.css',
-  '/src/core/app.js',
-  '/src/core/router.js',
-  '/src/core/i18n.js',
-  '/src/core/darkmode.js',
-  '/src/features/reading/reader.js',
-  '/src/features/reading/eink.js',
-  '/src/features/reading/reading-screen.js',
-  '/src/features/jester/jester.js',
-  '/src/features/garden/garden.js',
-  '/src/features/hashtiyeh/hashtiyeh.js',
-  '/src/features/hashtiyeh/hashtiyeh-ui.js',
-  '/src/features/onboarding/onboarding.js',
-  '/src/features/onboarding/onboarding-ui.js',
-  '/src/features/transfer/transfer.js',
-  '/src/features/palace/palace.js',
-  '/node_modules/three/build/three.module.js',
+  '/css/fonts.css',
+  '/fonts/Vazirmatn-Regular.ttf',
+  '/fonts/Vazirmatn-Medium.ttf',
+  '/fonts/Vazirmatn-Bold.ttf',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
 ];
 
 // Install: cache all static assets
@@ -86,24 +84,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Google Fonts: cache-first with network fallback
-  if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
-    event.respondWith(
-      caches.match(request).then((cached) => {
-        if (cached) return cached;
-        return fetch(request).then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
-          return response;
-        });
-      })
-    );
-    return;
-  }
-
-  // Static assets: cache-first
+  // Static assets (incl. self-hosted fonts): cache-first
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
