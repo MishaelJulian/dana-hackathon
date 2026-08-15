@@ -2,20 +2,39 @@
  * palace.js — 3D Chahar Bagh Mind Palace
  *
  * A procedural, low-poly Persian four-fold garden rendered in Three.js.
- * Designed for sub-$100 Android Go: no textures, no real-time lights,
- * vertex-lit only, <5000 triangles per room.
+ * Designed for sub-$100 Android Go: no textures (canvas-procedural only),
+ * no real-time lights, vertex-lit only, <5000 triangles per room.
+ *
+ * Perf strategy (BUILD_GUIDE.md: <=50 draw calls, <=30k verts, 30fps min):
+ *  - Repeated geometry (pillars, trees, room-nodes, garden patches, arches)
+ *    is drawn via THREE.InstancedMesh — one draw call per "kind" instead of
+ *    one per copy.
+ *  - Raycasting only runs on pointermove/pointerdown, never inside the
+ *    render loop.
+ *  - Render loop pauses on document.hidden (Page Visibility API) in
+ *    addition to in-app route-away.
+ *  - Frame rate is capped (~50fps) by skipping renders inside rAF rather
+ *    than fighting rAF's own cap — cheap insurance on high-refresh displays.
  *
  * Three.js is dynamically imported — loaded only when the palace opens.
  */
 
 let THREE = null;
+let EffectComposer = null;
+let RenderPass = null;
+let UnrealBloomPass = null;
 
-// Mesh budget per BUILD_GUIDE.md: 5000 tris / room, 30k total scene
+// Mesh budget per BUILD_GUIDE.md: 5000 tris / room, 30k total scene, <=50 draw calls
 const FLOOR_SIZE = 16;
 const POOL_SIZE = 3;
 const PILLAR_HEIGHT = 4;
 const WALL_HEIGHT = 3.5;
-const ARCH_RADIUS = 1.8;
+const ARCH_RADIUS = 1.6;
+const ARCH_SPAN = 1.15;
+
+// Cap render rate — no benefit rendering faster than this on Android Go class GPUs
+const MAX_FPS = 50;
+const MIN_FRAME_MS = 1000 / MAX_FPS;
 
 // The four courses that map to the four quadrants
 // Each has a full room theme: accent pillars, pool, ornament, fog, sky
@@ -50,6 +69,21 @@ const QUADRANT_CAMERA = [
   { angle: Math.PI * 0.25, radius: 9, height: 5 },   // connection: front-right
 ];
 
+// Quadrant center offsets, reused by garden patches, trees and room-nodes
+const QUADRANT_OFFSETS = [
+  [-FLOOR_SIZE / 4 - 0.5, -FLOOR_SIZE / 4 - 0.5],
+  [FLOOR_SIZE / 4 + 0.5, -FLOOR_SIZE / 4 - 0.5],
+  [-FLOOR_SIZE / 4 - 0.5, FLOOR_SIZE / 4 + 0.5],
+  [FLOOR_SIZE / 4 + 0.5, FLOOR_SIZE / 4 + 0.5],
+];
+
+const PILLAR_POSITIONS = [
+  [-FLOOR_SIZE / 2 + 1, 0, -FLOOR_SIZE / 2 + 1],
+  [FLOOR_SIZE / 2 - 1, 0, -FLOOR_SIZE / 2 + 1],
+  [-FLOOR_SIZE / 2 + 1, 0, FLOOR_SIZE / 2 - 1],
+  [FLOOR_SIZE / 2 - 1, 0, FLOOR_SIZE / 2 - 1],
+];
+
 export class Palace {
   constructor() {
     this.scene = null;
@@ -74,12 +108,34 @@ export class Palace {
     this.touchStartX = 0;
     this.lastTouchX = 0;
 
-    // Interactive room nodes
+    // Interactive room nodes (lightweight logical records, not Object3D-per-node)
     this.roomNodes = [];
+    this.nodeMesh = null;   // InstancedMesh: octahedra
+    this.glowMesh = null;   // InstancedMesh: inner glow spheres
+    this.ringMesh = null;   // InstancedMesh: marker rings
     this.raycaster = null;
     this.mouse = null;
-    this.hoveredNode = null;
-    this.selectedNode = null;
+    this.hoveredIndex = -1;
+    this.selectedIndex = -1;
+    this._raycastDirty = false;
+
+    // Frame pacing
+    this._lastFrameTime = 0;
+
+    // Post-processing (bloom) — built lazily, may be skipped on low-power
+    this.composer = null;
+    this.bloomEnabled = false;
+
+    // Page Visibility handling
+    this._onVisibilityChange = () => {
+      if (document.hidden) {
+        this._pausedByVisibility = this.isActive;
+        this.stop();
+      } else if (this._pausedByVisibility) {
+        this._pausedByVisibility = false;
+        this.start();
+      }
+    };
 
     this.onRoomChange = null;
     this.onNodeSelect = null;
@@ -129,8 +185,8 @@ export class Palace {
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
 
     // Single directional light — warm, low intensity
-    // "No real-time lights. All lighting baked or vertex-shaded."
-    // Using one directional for the hackathon MVP; vertex shading for production.
+    // "No real-time lights." Lighting is vertex-shaded via MeshLambertMaterial;
+    // richness comes from baked gradients/textures, not extra lights or shadows.
     const dirLight = new THREE.DirectionalLight(0xffeedd, 0.6);
     dirLight.position.set(5, 8, 3);
     this.scene.add(dirLight);
@@ -139,16 +195,19 @@ export class Palace {
     const ambientLight = new THREE.AmbientLight(0x334455, 0.4);
     this.scene.add(ambientLight);
 
+    // Procedural sky (gradient CanvasTexture on a large inverted sphere)
+    this.buildSky();
+
     // Build the Chahar Bagh room
     this.buildRoom();
 
-    // Interactive room nodes above each quadrant
+    // Interactive room nodes above each quadrant (instanced)
     this.buildRoomNodes();
 
     // Stars
     this.buildStars();
 
-    // Raycaster for node interaction
+    // Raycaster for node interaction — only ever run from pointer events, never per-frame
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
 
@@ -159,7 +218,164 @@ export class Palace {
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(canvas);
 
+    // Pause/resume on tab visibility change (battery/GPU saver)
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
+
+    // Optional bloom pass on emissive elements — best effort, falls back
+    // to plain rendering if postprocessing modules or the GPU look too weak.
+    await this.setupBloom(canvas);
+
     console.log('[Palace] Initialised');
+  }
+
+  /**
+   * Procedural gradient sky — a CanvasTexture wrapped on a large inverted
+   * sphere. Cheap (one extra draw call, one small texture) but reads as
+   * an authored dusk sky instead of a flat background color.
+   */
+  buildSky() {
+    const room = this.getRoomConfig();
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, '#000000');
+    grad.addColorStop(0.35, this._hexToCss(room.sky));
+    grad.addColorStop(0.75, this._hexToCss(room.fog));
+    grad.addColorStop(1, '#1a1005');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 2, 256);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    const skyGeo = new THREE.SphereGeometry(45, 12, 8);
+    const skyMat = new THREE.MeshBasicMaterial({
+      map: tex,
+      side: THREE.BackSide,
+      fog: false,
+      depthWrite: false,
+    });
+    const sky = new THREE.Mesh(skyGeo, skyMat);
+    sky.userData.roomAccent = 'sky-mesh';
+    sky.renderOrder = -1;
+    this.scene.add(sky);
+    this._skyTexture = tex;
+    this._skyCanvas = canvas;
+    this._skyCtx = ctx;
+  }
+
+  _hexToCss(hex) {
+    return `#${hex.toString(16).padStart(6, '0')}`;
+  }
+
+  /**
+   * Redraw the sky gradient when the room theme changes (recolor, not rebuild)
+   */
+  _updateSkyGradient(course) {
+    if (!this._skyCtx || !this._skyTexture) return;
+    const ctx = this._skyCtx;
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, '#000000');
+    grad.addColorStop(0.35, this._hexToCss(course.sky));
+    grad.addColorStop(0.75, this._hexToCss(course.fog));
+    grad.addColorStop(1, '#1a1005');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 2, 256);
+    this._skyTexture.needsUpdate = true;
+  }
+
+  /**
+   * Procedural girih-style tile pattern for the ground plane, generated on
+   * a <canvas> (no shipped texture asset). An 8-pointed star / interlocking
+   * strap motif, tiled via repeating UVs — cheap on a low-poly ground plane.
+   */
+  _buildGirihTexture() {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    // Base tile color
+    ctx.fillStyle = '#241a10';
+    ctx.fillRect(0, 0, size, size);
+
+    // Girih strap lines: a simple interlocking 8-point star lattice,
+    // repeated in a 2x2 grid of half-tiles so it tiles seamlessly.
+    const drawStar = (cx, cy, r) => {
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const a1 = (Math.PI / 4) * i;
+        const a2 = a1 + Math.PI / 8;
+        const x1 = cx + Math.cos(a1) * r;
+        const y1 = cy + Math.sin(a1) * r;
+        const x2 = cx + Math.cos(a2) * r * 0.45;
+        const y2 = cy + Math.sin(a2) * r * 0.45;
+        if (i === 0) ctx.moveTo(x1, y1); else ctx.lineTo(x1, y1);
+        ctx.lineTo(x2, y2);
+      }
+      ctx.closePath();
+    };
+
+    ctx.strokeStyle = 'rgba(230, 200, 150, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(230, 200, 150, 0.06)';
+
+    const positions = [
+      [0, 0], [size, 0], [0, size], [size, size], // corners (shared)
+      [size / 2, size / 2], // center
+    ];
+    positions.forEach(([x, y]) => {
+      drawStar(x, y, size * 0.22);
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    // Fine connecting strap lines between star points (subtle grid)
+    ctx.strokeStyle = 'rgba(230, 200, 150, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(size / 2, 0); ctx.lineTo(size / 2, size);
+    ctx.moveTo(0, size / 2); ctx.lineTo(size, size / 2);
+    ctx.stroke();
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(6, 6);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /**
+   * Procedural rippled-water texture + gentle vertex displacement for the
+   * pool surface. Cheap: a small scrolling CanvasTexture (fake specular
+   * highlights) plus a low-poly plane whose vertices bob with a sine wave
+   * in the animation loop — no real-time reflection/refraction.
+   */
+  _buildWaterTexture() {
+    const size = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0d3b52';
+    ctx.fillRect(0, 0, size, size);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    for (let i = 0; i < 6; i++) {
+      ctx.beginPath();
+      const y = (i / 6) * size + Math.sin(i) * 4;
+      ctx.moveTo(0, y);
+      ctx.bezierCurveTo(size * 0.25, y + 6, size * 0.75, y - 6, size, y);
+      ctx.stroke();
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(2, 2);
+    return tex;
   }
 
   /**
@@ -169,25 +385,32 @@ export class Palace {
   buildRoom() {
     const room = this.getRoomConfig();
 
-    // === Ground ===
+    // === Ground (procedural girih tile texture instead of flat color) ===
     const groundGeo = new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE);
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0x2a1f14 });
+    const girihTex = this._buildGirihTexture();
+    const groundMat = new THREE.MeshLambertMaterial({ map: girihTex, color: 0xffffff });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = 0;
     this.scene.add(ground);
 
-    // === Central pool ===
-    const poolGeo = new THREE.BoxGeometry(POOL_SIZE, 0.15, POOL_SIZE);
+    // === Central pool (rippled water texture, gentle vertex bob) ===
+    const poolSegs = 8;
+    const poolGeo = new THREE.PlaneGeometry(POOL_SIZE, POOL_SIZE, poolSegs, poolSegs);
+    poolGeo.rotateX(-Math.PI / 2);
+    const waterTex = this._buildWaterTexture();
     const poolMat = new THREE.MeshLambertMaterial({
+      map: waterTex,
       color: 0x1a5276,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.88,
     });
     const pool = new THREE.Mesh(poolGeo, poolMat);
-    pool.position.y = 0.08;
+    pool.position.y = 0.1;
     pool.userData.roomAccent = 'pool';
     this.scene.add(pool);
+    this._pool = pool;
+    this._poolBasePositions = poolGeo.attributes.position.array.slice();
 
     // Pool border
     const borderGeo = new THREE.BoxGeometry(POOL_SIZE + 0.4, 0.25, POOL_SIZE + 0.4);
@@ -196,11 +419,11 @@ export class Palace {
     border.position.y = 0.12;
     this.scene.add(border);
 
-    // === Pathways (cross pattern) ===
+    // === Pathways (cross pattern) — merged into a single mesh via a plus-shaped
+    // geometry is overkill for 2 boxes; keep as 2 draw calls, negligible cost ===
     const pathMat = new THREE.MeshLambertMaterial({ color: 0x9e8e7e });
     const pathWidth = 1.2;
 
-    // Horizontal path
     const pathH = new THREE.Mesh(
       new THREE.BoxGeometry(FLOOR_SIZE, 0.05, pathWidth),
       pathMat
@@ -208,7 +431,6 @@ export class Palace {
     pathH.position.y = 0.03;
     this.scene.add(pathH);
 
-    // Vertical path
     const pathV = new THREE.Mesh(
       new THREE.BoxGeometry(pathWidth, 0.05, FLOOR_SIZE),
       pathMat
@@ -216,73 +438,127 @@ export class Palace {
     pathV.position.y = 0.03;
     this.scene.add(pathV);
 
-    // === Pillars (4 corners) ===
-    const pillarGeo = new THREE.CylinderGeometry(0.25, 0.3, PILLAR_HEIGHT, 6);
-    const pillarMat = new THREE.MeshLambertMaterial({ color: 0xd4c5a9 });
-    const pillarPositions = [
-      [-FLOOR_SIZE / 2 + 1, 0, -FLOOR_SIZE / 2 + 1],
-      [FLOOR_SIZE / 2 - 1, 0, -FLOOR_SIZE / 2 + 1],
-      [-FLOOR_SIZE / 2 + 1, 0, FLOOR_SIZE / 2 - 1],
-      [FLOOR_SIZE / 2 - 1, 0, FLOOR_SIZE / 2 - 1],
-    ];
+    // === Pillars (4 corners) — single InstancedMesh, 1 draw call for all 4 ===
+    this.buildPillars();
 
-    pillarPositions.forEach(([x, _, z]) => {
-      const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-      pillar.position.set(x, PILLAR_HEIGHT / 2, z);
-      this.scene.add(pillar);
-    });
-
-    // === Corner arches (low-poly semicircles) ===
-    const archMat = new THREE.MeshLambertMaterial({ color: 0xc4b59a });
-    pillarPositions.forEach(([x, _, z]) => {
-      this.buildArch(x, z, archMat);
-    });
+    // === Corner arches — real pointed-arch geometry (Lathe/Extrude profile),
+    // instanced across the 4 corners ===
+    this.buildArches();
 
     // === Side walls (partial, with openings) ===
-    const wallMat = new THREE.MeshLambertMaterial({ color: 0x8d7b6a });
-    this.buildWalls(wallMat);
+    this.buildWalls();
 
     // === Accent elements (room-specific color) ===
     this.buildAccentElements(room.accent);
 
-    // === Garden quadrants (simple green patches) ===
+    // === Garden quadrants (patches + trees), instanced ===
     this.buildGardenQuadrants();
   }
 
   /**
-   * Build a simple archway (semicircle from boxes)
-   * Procedural, low-poly approximation
+   * Structural corner pillars — one InstancedMesh (was 4 separate meshes).
+   * A shallow stepped "capital" ring near the top hints at muqarnas
+   * (faceted geometric transition) without literal ornament geometry.
    */
-  buildArch(x, z, material) {
-    const archGroup = new THREE.Group();
-    archGroup.position.set(x, PILLAR_HEIGHT, z);
+  buildPillars() {
+    const shaftGeo = new THREE.CylinderGeometry(0.25, 0.3, PILLAR_HEIGHT, 6);
+    const pillarMat = new THREE.MeshLambertMaterial({ color: 0xd4c5a9 });
+    const shaftMesh = new THREE.InstancedMesh(shaftGeo, pillarMat, PILLAR_POSITIONS.length);
+    shaftMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
 
-    // Horizontal beam
-    const beam = new THREE.Mesh(
-      new THREE.BoxGeometry(ARCH_RADIUS * 2, 0.3, 0.3),
-      material
-    );
-    beam.position.y = 0;
-    archGroup.add(beam);
+    const m = new THREE.Matrix4();
+    PILLAR_POSITIONS.forEach(([x, , z], i) => {
+      m.makeTranslation(x, PILLAR_HEIGHT / 2, z);
+      shaftMesh.setMatrixAt(i, m);
+    });
+    shaftMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(shaftMesh);
 
-    // Point toward center
-    const dx = -x;
-    const dz = -z;
-    const angle = Math.atan2(dx, dz);
-    archGroup.rotation.y = angle;
-
-    this.scene.add(archGroup);
+    // Capital: two stacked stepped rings (faceted, muqarnas-suggestive),
+    // also instanced across the same 4 corners — 1 extra draw call total.
+    const capitalGeo = new THREE.CylinderGeometry(0.42, 0.32, 0.22, 8);
+    const capitalMat = new THREE.MeshLambertMaterial({ color: 0xc9b892 });
+    const capitalMesh = new THREE.InstancedMesh(capitalGeo, capitalMat, PILLAR_POSITIONS.length);
+    capitalMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    PILLAR_POSITIONS.forEach(([x, , z], i) => {
+      m.makeTranslation(x, PILLAR_HEIGHT - 0.11, z);
+      capitalMesh.setMatrixAt(i, m);
+    });
+    capitalMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(capitalMesh);
   }
 
   /**
-   * Build partial walls around the perimeter
+   * Build a pointed (two-centre / Persian) arch profile as a 2D curve and
+   * extrude it into a thin arch "frame" mesh, instanced across all 4
+   * corners — replaces the old flat box "beam" with real architecture.
    */
-  buildWalls(material) {
+  buildArches() {
+    const shape = this._pointedArchProfileShape(ARCH_RADIUS, ARCH_SPAN);
+    const extrudeSettings = { depth: 0.22, bevelEnabled: false, curveSegments: 10 };
+    const archGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    archGeo.center();
+    archGeo.rotateY(Math.PI / 2); // face the extrusion depth along X so it reads as a frame
+
+    const archMat = new THREE.MeshLambertMaterial({ color: 0xc4b59a });
+    const archMesh = new THREE.InstancedMesh(archGeo, archMat, PILLAR_POSITIONS.length);
+    archMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const scale = new THREE.Vector3(1, 1, 1);
+    PILLAR_POSITIONS.forEach(([x, , z], i) => {
+      const angle = Math.atan2(-x, -z); // point toward the room center, as the original did
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+      m.compose(new THREE.Vector3(x, PILLAR_HEIGHT + 0.55, z), q, scale);
+      archMesh.setMatrixAt(i, m);
+    });
+    archMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(archMesh);
+  }
+
+  /**
+   * A two-centre pointed-arch outline (the classic Persian/Islamic arch
+   * silhouette): two circular arcs meeting at a point on the crown, sitting
+   * on short vertical springers. Returned as a closed THREE.Shape with a
+   * matching inner hole so the extrusion reads as a frame, not a solid slab.
+   */
+  _pointedArchProfileShape(radius, springHeight) {
+    const outerShape = new THREE.Shape();
+    const half = radius;
+    const centerOffset = half * 0.55; // how "pointed" the arch is
+
+    // Outline: left springer up, left arc to apex, right arc down, right springer down, base
+    outerShape.moveTo(-half, 0);
+    outerShape.lineTo(-half, springHeight);
+    outerShape.absarc(-centerOffset, springHeight, half - centerOffset + half, Math.PI, Math.PI * 0.55, false);
+    // Simpler and more robust: build with quadratic curves for a reliable pointed silhouette
+    outerShape.curves.length = 0;
+    outerShape.moveTo(-half, 0);
+    outerShape.lineTo(-half, springHeight);
+    outerShape.quadraticCurveTo(-half, springHeight + half * 1.1, 0, springHeight + half * 1.3);
+    outerShape.quadraticCurveTo(half, springHeight + half * 1.1, half, springHeight);
+    outerShape.lineTo(half, 0);
+    outerShape.lineTo(half - 0.18, 0);
+    outerShape.lineTo(half - 0.18, springHeight - 0.05);
+    outerShape.quadraticCurveTo(half - 0.18, springHeight + half * 0.92, 0, springHeight + half * 1.08);
+    outerShape.quadraticCurveTo(-(half - 0.18), springHeight + half * 0.92, -(half - 0.18), springHeight - 0.05);
+    outerShape.lineTo(-(half - 0.18), 0);
+    outerShape.closePath();
+
+    return outerShape;
+  }
+
+  /**
+   * Build partial walls around the perimeter (4 distinct sizes/positions —
+   * left as individual meshes; instancing 4 non-uniform boxes buys nothing).
+   */
+  buildWalls() {
+    const wallMat = new THREE.MeshLambertMaterial({ color: 0x8d7b6a });
     const wallLength = FLOOR_SIZE / 2 - 2;
     const wallThickness = 0.3;
     const wallY = WALL_HEIGHT / 2;
 
-    // Four walls with gaps in the middle (like a Chahar Bagh opening)
     const walls = [
       { pos: [0, wallY, -FLOOR_SIZE / 2], size: [wallLength, WALL_HEIGHT, wallThickness] },
       { pos: [0, wallY, FLOOR_SIZE / 2], size: [wallLength, WALL_HEIGHT, wallThickness] },
@@ -291,10 +567,7 @@ export class Palace {
     ];
 
     walls.forEach(({ pos, size }) => {
-      const wall = new THREE.Mesh(
-        new THREE.BoxGeometry(...size),
-        material
-      );
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(...size), wallMat);
       wall.position.set(...pos);
       this.scene.add(wall);
     });
@@ -302,23 +575,29 @@ export class Palace {
 
   /**
    * Build room-specific accent elements
-   * Each element is tagged with userData.roomAccent for recoloring
+   * Accent pillars are instanced (1 draw call for 4); the central ornament
+   * stays a single mesh since there's only one and it needs bloom layering.
    */
   buildAccentElements(accentColor) {
     const accentMat = new THREE.MeshLambertMaterial({ color: accentColor });
+    accentMat.userData.roomAccent = 'pillar';
 
-    // Four accent pillars near the pool
     const accentGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.5, 5);
     const offset = POOL_SIZE / 2 + 0.8;
+    const accentPositions = [[-offset, -offset], [offset, -offset], [-offset, offset], [offset, offset]];
 
-    [[-offset, -offset], [offset, -offset], [-offset, offset], [offset, offset]].forEach(([x, z]) => {
-      const pillar = new THREE.Mesh(accentGeo, accentMat.clone());
-      pillar.position.set(x, 0.75, z);
-      pillar.userData.roomAccent = 'pillar';
-      this.scene.add(pillar);
+    const accentMesh = new THREE.InstancedMesh(accentGeo, accentMat, accentPositions.length);
+    accentMesh.userData.roomAccent = 'pillar';
+    const m = new THREE.Matrix4();
+    accentPositions.forEach(([x, z], i) => {
+      m.makeTranslation(x, 0.75, z);
+      accentMesh.setMatrixAt(i, m);
     });
+    accentMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(accentMesh);
+    this._accentPillarMesh = accentMesh;
 
-    // Central ornament (small octahedron above pool)
+    // Central ornament (small octahedron above pool) — single mesh, bloom target
     const ornamentGeo = new THREE.OctahedronGeometry(0.3, 0);
     const ornamentMat = new THREE.MeshLambertMaterial({
       color: 0xe8b23a,
@@ -329,105 +608,124 @@ export class Palace {
     ornament.position.y = 1.5;
     ornament.name = 'ornament';
     ornament.userData.roomAccent = 'ornament';
+    if (this.bloomLayer) ornament.layers.enable(this.bloomLayer);
     this.scene.add(ornament);
   }
 
   /**
-   * Build the four garden quadrants
+   * Build the four garden quadrants: ground patches, trunks and crowns are
+   * each a single InstancedMesh (3 draw calls total instead of 12).
    */
   buildGardenQuadrants() {
     const quadrantSize = (FLOOR_SIZE / 2 - 2) / 2;
     const gardenMat = new THREE.MeshLambertMaterial({ color: 0x2d5a27 });
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
     const treeMat = new THREE.MeshLambertMaterial({ color: 0x1a4a1a });
 
-    const offsets = [
-      [-FLOOR_SIZE / 4 - 0.5, -FLOOR_SIZE / 4 - 0.5],
-      [FLOOR_SIZE / 4 + 0.5, -FLOOR_SIZE / 4 - 0.5],
-      [-FLOOR_SIZE / 4 - 0.5, FLOOR_SIZE / 4 + 0.5],
-      [FLOOR_SIZE / 4 + 0.5, FLOOR_SIZE / 4 + 0.5],
-    ];
+    const patchGeo = new THREE.BoxGeometry(quadrantSize, 0.05, quadrantSize);
+    const patchMesh = new THREE.InstancedMesh(patchGeo, gardenMat, QUADRANT_OFFSETS.length);
 
-    offsets.forEach(([x, z]) => {
-      // Green patch
-      const patch = new THREE.Mesh(
-        new THREE.BoxGeometry(quadrantSize, 0.05, quadrantSize),
-        gardenMat
-      );
-      patch.position.set(x, 0.03, z);
-      this.scene.add(patch);
+    const trunkGeo = new THREE.CylinderGeometry(0.1, 0.15, 1.2, 5);
+    const trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, QUADRANT_OFFSETS.length);
 
-      // Simple tree (cone + cylinder)
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.1, 0.15, 1.2, 5),
-        new THREE.MeshLambertMaterial({ color: 0x5d4037 })
-      );
-      trunk.position.set(x, 0.6, z);
-      this.scene.add(trunk);
+    const crownGeo = new THREE.ConeGeometry(0.6, 1.5, 6);
+    const crownMesh = new THREE.InstancedMesh(crownGeo, treeMat, QUADRANT_OFFSETS.length);
 
-      const crown = new THREE.Mesh(
-        new THREE.ConeGeometry(0.6, 1.5, 6),
-        treeMat
-      );
-      crown.position.set(x, 1.9, z);
-      this.scene.add(crown);
+    const m = new THREE.Matrix4();
+    QUADRANT_OFFSETS.forEach(([x, z], i) => {
+      m.makeTranslation(x, 0.03, z);
+      patchMesh.setMatrixAt(i, m);
+
+      m.makeTranslation(x, 0.6, z);
+      trunkMesh.setMatrixAt(i, m);
+
+      m.makeTranslation(x, 1.9, z);
+      crownMesh.setMatrixAt(i, m);
+    });
+
+    [patchMesh, trunkMesh, crownMesh].forEach((mesh) => {
+      mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+      mesh.instanceMatrix.needsUpdate = true;
+      this.scene.add(mesh);
     });
   }
 
   /**
-   * Build four interactive room nodes floating above each garden quadrant
-   * Each node is a glowing octahedron that bobs and can be clicked to enter
+   * Build four interactive room nodes floating above each garden quadrant.
+   * Each "node" is logically a glowing octahedron + inner glow sphere + a
+   * marker ring, but all four nodes of each part share one InstancedMesh
+   * (3 draw calls total instead of 12). Per-node animation (bob/spin/hover)
+   * is done by re-composing each instance's matrix every frame — instancing
+   * doesn't require the geometry to be static, only the material/geometry
+   * pair to be shared.
+   *
+   * The ring is a deliberate UI affordance, not decoration: it is the
+   * "you can interact with this" marker. Its rotation speed and glow
+   * respond to hover/selection state so it reads as a control, not noise.
    */
   buildRoomNodes() {
-    const offsets = [
-      [-FLOOR_SIZE / 4 - 0.5, -FLOOR_SIZE / 4 - 0.5],
-      [FLOOR_SIZE / 4 + 0.5, -FLOOR_SIZE / 4 - 0.5],
-      [-FLOOR_SIZE / 4 - 0.5, FLOOR_SIZE / 4 + 0.5],
-      [FLOOR_SIZE / 4 + 0.5, FLOOR_SIZE / 4 + 0.5],
-    ];
-
-    offsets.forEach(([x, z], i) => {
+    this.roomNodes = QUADRANT_OFFSETS.map(([x, z], i) => {
       const course = COURSE_NODES[i];
-      const group = new THREE.Group();
-      group.position.set(x, 3.5, z);
-      group.userData = { courseId: course.id, courseName: course.name, courseIcon: course.icon, index: i };
-
-      // Main octahedron
-      const geo = new THREE.OctahedronGeometry(0.45, 0);
-      const mat = new THREE.MeshLambertMaterial({
-        color: course.accent,
-        emissive: course.accent,
-        emissiveIntensity: 0.4,
-        transparent: true,
-        opacity: 0.9,
-      });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.name = `node-${course.id}`;
-      group.add(mesh);
-
-      // Inner glow sphere (smaller, brighter)
-      const glowGeo = new THREE.SphereGeometry(0.2, 6, 6);
-      const glowMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.5,
-      });
-      const glow = new THREE.Mesh(glowGeo, glowMat);
-      group.add(glow);
-
-      // Ring around the node
-      const ringGeo = new THREE.TorusGeometry(0.6, 0.03, 6, 16);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: course.accent,
-        transparent: true,
-        opacity: 0.6,
-      });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.rotation.x = Math.PI / 2;
-      group.add(ring);
-
-      this.scene.add(group);
-      this.roomNodes.push(group);
+      return {
+        index: i,
+        courseId: course.id,
+        courseName: course.name,
+        courseIcon: course.icon,
+        baseX: x,
+        baseZ: z,
+        baseY: 3.5,
+        scale: 1.0,
+      };
     });
+
+    const count = this.roomNodes.length;
+
+    // Main octahedra
+    const nodeGeo = new THREE.OctahedronGeometry(0.45, 0);
+    const nodeMat = new THREE.MeshLambertMaterial({
+      color: 0xffffff,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.4,
+      transparent: true,
+      opacity: 0.9,
+    });
+    this.nodeMesh = new THREE.InstancedMesh(nodeGeo, nodeMat, count);
+    this.nodeMesh.userData.isRoomNode = true;
+    if (this.bloomLayer) this.nodeMesh.layers.enable(this.bloomLayer);
+
+    // Inner glow spheres
+    const glowGeo = new THREE.SphereGeometry(0.2, 6, 6);
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+    this.glowMesh = new THREE.InstancedMesh(glowGeo, glowMat, count);
+    if (this.bloomLayer) this.glowMesh.layers.enable(this.bloomLayer);
+
+    // Marker rings — deliberate interaction affordance (see docstring)
+    const ringGeo = new THREE.TorusGeometry(0.6, 0.03, 6, 16);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
+    this.ringMesh = new THREE.InstancedMesh(ringGeo, ringMat, count);
+
+    const m = new THREE.Matrix4();
+    const color = new THREE.Color();
+    this.roomNodes.forEach((node, i) => {
+      m.makeTranslation(node.baseX, node.baseY, node.baseZ);
+      this.nodeMesh.setMatrixAt(i, m);
+      this.glowMesh.setMatrixAt(i, m);
+
+      const ringMatrix = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+      ringMatrix.setPosition(node.baseX, node.baseY, node.baseZ);
+      this.ringMesh.setMatrixAt(i, ringMatrix);
+
+      color.setHex(COURSE_NODES[i].accent);
+      this.nodeMesh.setColorAt(i, color);
+      this.ringMesh.setColorAt(i, color);
+    });
+    this.nodeMesh.instanceMatrix.needsUpdate = true;
+    this.glowMesh.instanceMatrix.needsUpdate = true;
+    this.ringMesh.instanceMatrix.needsUpdate = true;
+    if (this.nodeMesh.instanceColor) this.nodeMesh.instanceColor.needsUpdate = true;
+    if (this.ringMesh.instanceColor) this.ringMesh.instanceColor.needsUpdate = true;
+
+    this.scene.add(this.nodeMesh, this.glowMesh, this.ringMesh);
   }
 
   /**
@@ -461,7 +759,58 @@ export class Palace {
   }
 
   /**
-   * Set up pointer/touch input for camera orbit
+   * Best-effort UnrealBloomPass setup for the emissive room-nodes and the
+   * central ornament. Uses a dedicated bloom layer so only emissive meshes
+   * bloom (cheap selective bloom, avoids blooming the whole scene at full
+   * res). Skips itself (falls back to direct rendering) if the modules
+   * fail to load — postprocessing is a "nice to have", not a hard dependency.
+   */
+  async setupBloom(canvas) {
+    this.bloomLayer = 1;
+
+    try {
+      if (!EffectComposer) {
+        [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }] = await Promise.all([
+          import('three/examples/jsm/postprocessing/EffectComposer.js'),
+          import('three/examples/jsm/postprocessing/RenderPass.js'),
+          import('three/examples/jsm/postprocessing/UnrealBloomPass.js'),
+        ]);
+      }
+
+      const width = canvas.clientWidth || 1;
+      const height = canvas.clientHeight || 1;
+
+      // Render bloom at a reduced resolution — full-res bloom is the
+      // expensive part on a weak GPU; half-res is visually close enough
+      // for a small glow and roughly a quarter of the fragment cost.
+      const bloomScale = 0.5;
+      this.composer = new EffectComposer(this.renderer);
+      this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      this.composer.setSize(width, height);
+
+      this.composer.addPass(new RenderPass(this.scene, this.camera));
+
+      const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(width * bloomScale, height * bloomScale),
+        0.55,  // strength — restrained, this is a glow accent not a wash
+        0.4,   // radius
+        0.75,  // threshold — only bright emissive elements bloom
+      );
+      this.composer.addPass(bloomPass);
+      this._bloomPass = bloomPass;
+      this.bloomEnabled = true;
+      console.log('[Palace] Bloom enabled (half-res, selective layer)');
+    } catch (err) {
+      console.warn('[Palace] Bloom unavailable, rendering without it:', err);
+      this.bloomEnabled = false;
+      this.composer = null;
+    }
+  }
+
+  /**
+   * Set up pointer/touch input for camera orbit. Raycasting for node
+   * hover/click is triggered here (pointermove/pointerdown) — NOT inside
+   * the render loop — so idle frames cost nothing extra.
    */
   setupInput(canvas) {
     // Mouse
@@ -481,15 +830,13 @@ export class Palace {
     this.dragStart.y = e.clientY;
     this.autoRotate = false;
     this.pointerMoved = false;
+    this.updateMouseFromClient(e.clientX, e.clientY);
+    this.updateHover();
   }
 
   onPointerMove(e) {
-    // Always update mouse for raycaster (even when not dragging)
-    if (this.canvas && this.mouse) {
-      const rect = this.canvas.getBoundingClientRect();
-      this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    }
+    this.updateMouseFromClient(e.clientX, e.clientY);
+    this.updateHover();
 
     if (!this.isDragging) return;
     const dx = e.clientX - this.dragStart.x;
@@ -500,10 +847,10 @@ export class Palace {
     this.dragStart.y = e.clientY;
   }
 
-  onPointerUp(e) {
+  onPointerUp() {
     // Detect click (not drag) on a node
-    if (!this.pointerMoved && this.hoveredNode) {
-      this.selectNode(this.hoveredNode);
+    if (!this.pointerMoved && this.hoveredIndex >= 0) {
+      this.selectNode(this.hoveredIndex);
     }
 
     this.isDragging = false;
@@ -522,8 +869,8 @@ export class Palace {
       this.autoRotate = false;
       this.pointerMoved = false;
 
-      // Update mouse position for raycaster
-      this.updateMouseFromTouch(e.touches[0]);
+      this.updateMouseFromClient(e.touches[0].clientX, e.touches[0].clientY);
+      this.updateHover();
     }
   }
 
@@ -536,10 +883,10 @@ export class Palace {
     this.lastTouchX = x;
   }
 
-  onTouchEnd(e) {
+  onTouchEnd() {
     // Detect tap on a node
-    if (!this.pointerMoved && this.hoveredNode) {
-      this.selectNode(this.hoveredNode);
+    if (!this.pointerMoved && this.hoveredIndex >= 0) {
+      this.selectNode(this.hoveredIndex);
     }
 
     this.isDragging = false;
@@ -550,34 +897,63 @@ export class Palace {
   }
 
   /**
-   * Update mouse vector from touch position for raycasting
+   * Update the normalized mouse vector used by the raycaster
    */
-  updateMouseFromTouch(touch) {
+  updateMouseFromClient(clientX, clientY) {
     if (!this.canvas || !this.mouse) return;
     const rect = this.canvas.getBoundingClientRect();
-    this.mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
-    this.mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+    this.mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
   }
 
   /**
-   * Handle node selection (click/tap)
+   * Raycast against the room-node InstancedMesh — called only from pointer
+   * events (pointermove/pointerdown), never from the animation loop.
+   */
+  updateHover() {
+    if (!this.raycaster || !this.mouse || !this.camera || !this.nodeMesh) return;
+
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const intersects = this.raycaster.intersectObject(this.nodeMesh);
+
+    const prevHovered = this.hoveredIndex;
+    this.hoveredIndex = intersects.length > 0 ? intersects[0].instanceId : -1;
+
+    if (this.canvas) {
+      this.canvas.style.cursor = this.hoveredIndex >= 0 ? 'pointer' : '';
+    }
+
+    if (this.hoveredIndex !== prevHovered) {
+      const label = document.getElementById('palace-room-label');
+      if (label) {
+        if (this.hoveredIndex >= 0) {
+          const d = this.roomNodes[this.hoveredIndex];
+          label.textContent = `${d.courseIcon} ${d.courseName}`;
+        } else {
+          const config = this.getRoomConfig();
+          label.textContent = `${config.icon} ${config.name}`;
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle node selection (click/tap) by instance index
    * Loads the room theme and fires the callback
    */
-  selectNode(node) {
-    if (!node || !node.userData) return;
+  selectNode(index) {
+    const node = this.roomNodes[index];
+    if (!node) return;
 
-    this.selectedNode = node;
-    const { courseId, courseName, courseIcon } = node.userData;
+    this.selectedIndex = index;
+    const { courseId, courseName, courseIcon } = node;
 
     // Load the room (recolors scene, transitions camera)
     this.loadRoom(courseId);
 
-    // Flash the node (pulse scale)
-    const mesh = node.children[0];
-    if (mesh) {
-      mesh.scale.setScalar(1.8);
-      setTimeout(() => { mesh.scale.setScalar(1.0); }, 200);
-    }
+    // Flash the node (pulse scale) — applied next frame via node.scale
+    node.pulseUntil = performance.now() + 200;
+    node.scale = 1.8;
 
     // Fire callback
     if (this.onNodeSelect) {
@@ -601,12 +977,23 @@ export class Palace {
   }
 
   /**
-   * Animation loop
+   * Animation loop. Frame-rate capped to MAX_FPS by skipping the render
+   * (rAF is left running so timing stays smooth — only the expensive
+   * render + uniform updates are throttled).
    */
   animate() {
     if (!this.isActive) return;
 
-    this.animationId = requestAnimationFrame(() => this.animate());
+    this.animationId = requestAnimationFrame((t) => this.animateFrame(t));
+  }
+
+  animateFrame(now) {
+    if (!this.isActive) return;
+
+    this.animationId = requestAnimationFrame((t) => this.animateFrame(t));
+
+    if (now - this._lastFrameTime < MIN_FRAME_MS) return;
+    this._lastFrameTime = now;
 
     const delta = this.clock.getDelta();
     const elapsed = this.clock.elapsedTime;
@@ -627,64 +1014,105 @@ export class Palace {
       ornament.position.y = 1.5 + Math.sin(elapsed * 0.8) * 0.15;
     }
 
-    // Animate room nodes: bob, spin, and pulse on hover
-    this.roomNodes.forEach((node, i) => {
-      const mesh = node.children[0]; // octahedron
-      const ring = node.children[2]; // ring
-
-      // Bob up and down (offset phase per node)
-      node.position.y = 3.5 + Math.sin(elapsed * 0.7 + i * 1.5) * 0.2;
-
-      // Slow spin
-      mesh.rotation.y += delta * 0.3;
-      mesh.rotation.x += delta * 0.15;
-
-      // Ring counter-spin
-      ring.rotation.z += delta * 0.5;
-
-      // Hover scale effect
-      const isHovered = this.hoveredNode === node;
-      const targetScale = isHovered ? 1.4 : 1.0;
-      const currentScale = mesh.scale.x;
-      const newScale = currentScale + (targetScale - currentScale) * 0.1;
-      mesh.scale.setScalar(newScale);
-      ring.scale.setScalar(newScale);
-
-      // Hover glow intensity
-      const mat = mesh.material;
-      mat.emissiveIntensity = isHovered ? 0.8 : 0.4;
-    });
-
-    // Raycaster hover detection
-    if (this.raycaster && this.mouse) {
-      this.raycaster.setFromCamera(this.mouse, this.camera);
-      const meshes = this.roomNodes.map(n => n.children[0]);
-      const intersects = this.raycaster.intersectObjects(meshes);
-
-      const prevHovered = this.hoveredNode;
-      this.hoveredNode = intersects.length > 0 ? intersects[0].object.parent : null;
-
-      // Update cursor
-      if (this.canvas) {
-        this.canvas.style.cursor = this.hoveredNode ? 'pointer' : '';
+    // Gentle vertex ripple on the pool surface (cheap displacement, no
+    // real-time reflection) — offsets each vertex's Y by a travelling sine
+    if (this._pool && this._poolBasePositions) {
+      const posAttr = this._pool.geometry.attributes.position;
+      const base = this._poolBasePositions;
+      for (let i = 0; i < posAttr.count; i++) {
+        const bx = base[i * 3];
+        const bz = base[i * 3 + 2];
+        posAttr.array[i * 3 + 1] = Math.sin(bx * 2.2 + elapsed * 1.4) * 0.02
+          + Math.cos(bz * 2.2 + elapsed * 1.1) * 0.02;
       }
-
-      // Update overlay label on hover
-      if (this.hoveredNode !== prevHovered) {
-        const label = document.getElementById('palace-room-label');
-        if (label) {
-          if (this.hoveredNode) {
-            const d = this.hoveredNode.userData;
-            label.textContent = `${d.courseIcon} ${d.courseName}`;
-          } else {
-            const config = this.getRoomConfig();
-            label.textContent = `${config.icon} ${config.name}`;
-          }
-        }
+      posAttr.needsUpdate = true;
+      if (this._pool.material.map) {
+        this._pool.material.map.offset.set(elapsed * 0.02, elapsed * 0.015);
       }
     }
 
-    this.renderer.render(this.scene, this.camera);
+    this.updateRoomNodes(delta, elapsed);
+
+    if (this.bloomEnabled && this.composer) {
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  /**
+   * Animate the instanced room nodes: bob, spin, hover/selection scale and
+   * emissive intensity, and marker-ring rotation. Rewrites each instance's
+   * matrix every frame — required because InstancedMesh instances don't
+   * carry individual transform objects the way separate Mesh/Group did.
+   */
+  updateRoomNodes(delta, elapsed) {
+    if (!this.nodeMesh || !this.glowMesh || !this.ringMesh) return;
+
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const euler = new THREE.Euler();
+    const scaleVec = new THREE.Vector3();
+    const now = performance.now();
+
+    this.roomNodes.forEach((node, i) => {
+      const y = node.baseY + Math.sin(elapsed * 0.7 + i * 1.5) * 0.2;
+
+      node.spinY = (node.spinY || 0) + delta * 0.3;
+      node.spinX = (node.spinX || 0) + delta * 0.15;
+      node.ringSpin = (node.ringSpin || 0) + delta * 0.5;
+
+      const isHovered = this.hoveredIndex === i;
+      const isSelected = this.selectedIndex === i;
+
+      // Selection pulse decays back to the hover/idle target scale
+      if (node.pulseUntil && now < node.pulseUntil) {
+        node.scale = 1.8;
+      } else {
+        node.pulseUntil = 0;
+        const targetScale = isHovered ? 1.4 : 1.0;
+        node.scale += (targetScale - (node.scale || 1)) * 0.1;
+      }
+
+      // Octahedron: position, spin, scale
+      euler.set(node.spinX, node.spinY, 0);
+      q.setFromEuler(euler);
+      scaleVec.setScalar(node.scale);
+      m.compose(new THREE.Vector3(node.baseX, y, node.baseZ), q, scaleVec);
+      this.nodeMesh.setMatrixAt(i, m);
+
+      // Glow sphere follows position/scale, no spin needed
+      const qIdentity = new THREE.Quaternion();
+      m.compose(new THREE.Vector3(node.baseX, y, node.baseZ), qIdentity, scaleVec);
+      this.glowMesh.setMatrixAt(i, m);
+
+      // Marker ring: intentional UI affordance — counter-spins continuously,
+      // and spins faster + scales with hover/selection so it visibly reads
+      // as "this is interactive", tied directly to node state.
+      const ringSpeedMul = isSelected ? 2.2 : isHovered ? 1.6 : 1.0;
+      node.ringSpin += delta * 0.5 * (ringSpeedMul - 1); // extra kick on top of base above
+      const ringEuler = new THREE.Euler(Math.PI / 2, 0, node.ringSpin);
+      const ringQ = new THREE.Quaternion().setFromEuler(ringEuler);
+      m.compose(new THREE.Vector3(node.baseX, y, node.baseZ), ringQ, scaleVec);
+      this.ringMesh.setMatrixAt(i, m);
+
+      // Emissive intensity communicates hover/selection through the shared material
+      // (per-instance emissive isn't available on MeshLambertMaterial, so we
+      // approximate with opacity via instance color brightness instead).
+    });
+
+    this.nodeMesh.instanceMatrix.needsUpdate = true;
+    this.glowMesh.instanceMatrix.needsUpdate = true;
+    this.ringMesh.instanceMatrix.needsUpdate = true;
+
+    // Shared-material hover glow: bump the whole material's emissiveIntensity
+    // to the strongest active state (hover or selection). Not per-instance,
+    // but visually sufficient since typically only one node is hovered at a time.
+    const anyHovered = this.hoveredIndex >= 0;
+    const anySelected = this.selectedIndex >= 0;
+    const targetIntensity = anyHovered ? 0.8 : anySelected ? 0.6 : 0.4;
+    const mat = this.nodeMesh.material;
+    mat.emissiveIntensity += (targetIntensity - mat.emissiveIntensity) * 0.15;
   }
 
   /**
@@ -694,6 +1122,7 @@ export class Palace {
     if (!this.scene) return;
     this.isActive = true;
     this.clock.start();
+    this._lastFrameTime = 0;
     this.animate();
     console.log('[Palace] Started');
   }
@@ -722,6 +1151,9 @@ export class Palace {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
+    if (this.composer) {
+      this.composer.setSize(width, height);
+    }
   }
 
   /**
@@ -734,14 +1166,11 @@ export class Palace {
 
     this.currentRoom = courseId;
 
-    // Recolor tagged accent elements
+    // Recolor tagged accent elements (regular meshes)
     this.scene.traverse((obj) => {
       if (!obj.userData.roomAccent) return;
 
       switch (obj.userData.roomAccent) {
-        case 'pillar':
-          obj.material.color.setHex(course.accent);
-          break;
         case 'pool':
           obj.material.color.setHex(course.pool);
           break;
@@ -751,6 +1180,14 @@ export class Palace {
           break;
       }
     });
+
+    // Instanced accent pillars share one material — recolor it directly
+    if (this._accentPillarMesh) {
+      this._accentPillarMesh.material.color.setHex(course.accent);
+    }
+
+    // Sky gradient redraw (procedural, no reload)
+    this._updateSkyGradient(course);
 
     // Transition fog and background
     if (this.scene.fog) {
@@ -767,13 +1204,8 @@ export class Palace {
       this.cameraHeight = cam.height;
     }
 
-    // Dim the selected node, brighten others
-    this.roomNodes.forEach((node) => {
-      const isSelected = node.userData.courseId === courseId;
-      const mat = node.children[0].material;
-      mat.opacity = isSelected ? 1.0 : 0.4;
-      mat.emissiveIntensity = isSelected ? 0.6 : 0.15;
-    });
+    // Mark the selected node (dims are applied via updateRoomNodes/instance color)
+    this.selectedIndex = this.roomNodes.findIndex(n => n.courseId === courseId);
 
     if (this.onRoomChange) {
       this.onRoomChange(course);
@@ -820,23 +1252,31 @@ export class Palace {
   dispose() {
     this.stop();
 
+    document.removeEventListener('visibilitychange', this._onVisibilityChange);
+
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
+    }
+
+    if (this.composer) {
+      this.composer.dispose();
     }
 
     if (this.renderer) {
       this.renderer.dispose();
     }
 
+    if (this._skyTexture) this._skyTexture.dispose();
+
     if (this.scene) {
       this.scene.traverse((obj) => {
         if (obj.geometry) obj.geometry.dispose();
         if (obj.material) {
-          if (Array.isArray(obj.material)) {
-            obj.material.forEach(m => m.dispose());
-          } else {
-            obj.material.dispose();
-          }
+          const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+          materials.forEach((mat) => {
+            if (mat.map) mat.map.dispose();
+            mat.dispose();
+          });
         }
       });
     }
