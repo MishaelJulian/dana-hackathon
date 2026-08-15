@@ -262,6 +262,37 @@ a {
   border-radius: 50% 50% 0 0;
 }
 
+.garden__ground--damp {
+  background: #6d5340;
+}
+
+/* Garden growth illustrations — centred, sitting on the ground line */
+.garden__seed,
+.garden__worms,
+.garden__sapling,
+.garden__plants,
+.garden__storm,
+.garden__tree {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 1;
+}
+
+.garden__worms {
+  gap: var(--space-2);
+}
+
+.garden__storm {
+  bottom: auto;
+  top: 8%;
+  z-index: 0;
+}
+
 .landing__hafez {
   margin-bottom: var(--space-5);
 }
@@ -1025,6 +1056,24 @@ a {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- Desktop / wide viewport --- */
+@media (min-width: 900px) {
+  .content {
+    max-width: 1100px;
+    margin-inline: auto;
+  }
+
+  .landing {
+    max-width: 720px;
+    margin-inline: auto;
+  }
+
+  .reading {
+    max-width: 1100px;
+    margin-inline: auto;
   }
 }
 
