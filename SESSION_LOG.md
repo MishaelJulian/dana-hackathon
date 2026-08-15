@@ -1,5 +1,26 @@
 # Session Log
 
+## Session: 010
+- **Date**: 2026-08-15 14:40
+- **Sprint**: Palace perf + garden accessibility
+
+### Completed
+- `palace.js` — InstancedMesh rewrite for repeated geometry (pillars, trees, room-nodes, garden patches, arches): one draw call per kind instead of per copy, per BUILD_GUIDE.md budget (≤50 draw calls, ≤30k verts). Render loop now pauses on `document.hidden` in addition to route-away. Frame rate capped ~50fps. Bloom pass added.
+- `garden.js` — replaced emoji progress icons with inline SVG silhouettes; each growth state (empty → damp → worms → sapling → plants → storm → tree) now legible by shape/density alone, not colour — fixes colourblind accessibility gap.
+- `main.css` — styling support for above.
+- Build verified (`npm run build`, compiles clean). Runtime verified headless (Puppeteer): landing screen, garden at tree-state, 3D palace all render with zero console errors beyond an unrelated favicon 404.
+
+### Build Status
+- Build: ✅ compiles
+- Palace: ✅ renders, InstancedMesh confirmed working
+- Garden: ✅ all states render, SVG icons confirmed
+- Console: ✅ clean (no real errors)
+
+### Git Commit
+- `00d6086` — pushed to https://github.com/MishaelJulian/dana-hackathon.git
+
+---
+
 ## Session: 007
 - **Date**: 2026-07-25 12:30
 - **Sprint**: Polish and test
