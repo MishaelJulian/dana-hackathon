@@ -1,40 +1,132 @@
 /**
- * reader.js — ZIM file reader
+ * reader.js — Offline Reader (Provider Pattern)
  * Demo mode with curated Persian content for hackathon presentation
- * Real ZIM/Kiwix integration via Service Worker when ZIM file is present
+ * Real offline corpus integration via JsonProvider
  */
+
+import { Jester } from '../jester/jester.js';
 
 export class ZimReader {
   constructor() {
-    this.articleList = [];
-    this.currentArticle = null;
+    this.provider = null;
   }
 
   async init() {
-    const zimPath = '/zim/wikipedia_fa_mini.zim';
+    // Try to initialize the real offline corpus
+    const jsonProvider = new JsonProvider();
+    const isCorpusAvailable = await jsonProvider.init();
 
-    try {
-      const response = await fetch(zimPath);
-      // Check it's actually a binary ZIM file, not Vite's HTML fallback
-      const contentType = response.headers.get('content-type') || '';
-      if (!response.ok || contentType.includes('text/html')) {
-        throw new Error('ZIM not found');
-      }
-      console.log('[ZimReader] ZIM file found — production mode');
-      // Production ZIM parsing would go here
-    } catch {
-      console.log('[ZimReader] Demo mode — curated content');
-      this.loadDemoContent();
+    if (isCorpusAvailable) {
+      console.log('[ZimReader] Offline Corpus found — using JsonProvider');
+      this.provider = jsonProvider;
+    } else {
+      console.log('[ZimReader] Corpus not found — using DemoProvider fallback');
+      this.provider = new DemoProvider();
+      await this.provider.init();
     }
   }
 
-  loadDemoContent() {
+  search(query) {
+    return this.provider.search(query);
+  }
+
+  async getArticle(articleId) {
+    return this.provider.getArticle(articleId);
+  }
+
+  getArticleCount() {
+    return this.provider.getArticleCount();
+  }
+
+  isReady() {
+    return this.provider && this.provider.isReady();
+  }
+}
+
+export class JsonProvider {
+  constructor() {
+    this.corpusPath = '/corpus.json';
+    this.articles = [];
+  }
+
+  async init() {
+    try {
+      const response = await fetch(this.corpusPath);
+      if (!response.ok) return false;
+      this.articles = await response.json();
+      return this.articles.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  search(query) {
+    if (!query || query.trim() === '') return this.articles;
+    const q = query.trim().toLowerCase();
+    return this.articles.filter(a => a.title.toLowerCase().includes(q) || a.text.toLowerCase().includes(q));
+  }
+
+  async getArticle(articleId) {
+    const article = this.articles.find(a => a.id === articleId || a.title === articleId);
+    if (!article) throw new Error(`Article not found: ${articleId}`);
+
+    // Generate attribution footer
+    const attributionHtml = `
+      <div class="article-attribution" style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.85em; color: #666; direction: rtl;">
+        <p><strong>منبع:</strong> ${article.source} — <a href="${article.sourceUrl}" target="_blank" rel="noopener noreferrer">مشاهده نسخه اصلی</a></p>
+        <p><strong>مجوز:</strong> محتوا تحت مجوز <a href="${article.licenseUrl}" target="_blank" rel="noopener noreferrer">${article.license}</a> در دسترس است.</p>
+      </div>
+    `;
+
+    // Extract claims deterministically from Jester using explicit sourceArticleId
+    let jesterClaims = [];
+    const jester = new Jester();
+    for (const encounter of jester.encounters) {
+      encounter.exchanges.forEach((exchange, index) => {
+        if (exchange.sourceArticleId === article.id) {
+          jesterClaims.push({
+            encounterId: encounter.id,
+            exchangeIndex: index,
+            courseId: encounter.trigger.split(':')[1] || 'nature',
+            text: exchange.claim,
+            correct: exchange.correct,
+            source: `${exchange.verification.verdict} — ${exchange.verification.found}`
+          });
+        }
+      });
+    }
+
+    return {
+      id: article.id,
+      title: article.title,
+      html: article.html + attributionHtml,
+      lastModified: new Date().toISOString(),
+      claims: jesterClaims
+    };
+  }
+
+  getArticleCount() {
+    return this.articles.length;
+  }
+
+  isReady() {
+    return this.articles.length > 0;
+  }
+}
+
+export class DemoProvider {
+  constructor() {
+    this.articleList = [];
+  }
+
+  async init() {
     this.articleList = DEMO_ARTICLES.map((a, i) => ({
       id: String(i + 1),
       title: a.title,
       course: a.course,
       url: `/wiki/${a.title}`,
     }));
+    return true;
   }
 
   search(query) {
@@ -53,7 +145,7 @@ export class ZimReader {
       title: meta.title,
       html: demo ? demo.html : genericArticle(meta.title),
       lastModified: new Date().toISOString(),
-      claims: demo?.claims || [],
+      claims: demo?.claims || [], // Hardcoded claims for demo
     };
   }
 
@@ -65,6 +157,8 @@ export class ZimReader {
     return this.articleList.length > 0;
   }
 }
+
+
 
 function genericArticle(title) {
   return `
