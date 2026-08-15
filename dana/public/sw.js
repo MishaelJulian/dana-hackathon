@@ -4,7 +4,11 @@
  * ZIM files are large and loaded separately via fetch (not cached in SW)
  */
 
-const CACHE_NAME = 'dana-v5';
+const CACHE_NAME = 'dana-v6';
+// Precache only paths stable across dev and a Vite production build (build
+// output hashes JS chunk filenames, so they can't be hardcoded here). JS/CSS
+// module chunks still end up offline-capable: the generic fetch handler
+// below caches every same-origin GET the first time it's fetched online.
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -13,25 +17,11 @@ const STATIC_ASSETS = [
   '/css/rtl.css',
   '/css/eink.css',
   '/css/palace.css',
-  '/src/core/app.js',
-  '/src/core/router.js',
-  '/src/core/i18n.js',
-  '/src/core/darkmode.js',
-  '/src/features/reading/reader.js',
-  '/src/features/reading/eink.js',
-  '/src/features/reading/reading-screen.js',
-  '/src/features/jester/jester.js',
-  '/src/features/garden/garden.js',
-  '/src/features/hashtiyeh/hashtiyeh.js',
-  '/src/features/hashtiyeh/hashtiyeh-ui.js',
-  '/src/features/onboarding/onboarding.js',
-  '/src/features/onboarding/onboarding-ui.js',
-  '/src/features/transfer/transfer.js',
-  '/src/features/palace/palace.js',
-  '/node_modules/three/build/three.module.js',
   '/fonts/vazirmatn-latin.woff2',
   '/fonts/vazirmatn-latin-ext.woff2',
   '/fonts/vazirmatn-arabic.woff2',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
   '/corpus.json'
 ];
 
@@ -89,7 +79,6 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-
 
   // Static assets: cache-first
   event.respondWith(
