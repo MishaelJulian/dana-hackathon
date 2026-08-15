@@ -11,6 +11,7 @@ import { Garden } from '../features/garden/garden.js';
 import { HashtiyehUI } from '../features/hashtiyeh/hashtiyeh-ui.js';
 import { OnboardingUI } from '../features/onboarding/onboarding-ui.js';
 import { Palace } from '../features/palace/palace.js';
+import { VerificationRegistry } from '../features/verification/registry.js';
 import { t, getLang, toggleLang, initLang } from './i18n.js';
 import { toggleTheme, initTheme } from './darkmode.js';
 
@@ -24,6 +25,7 @@ class DanaApp {
     this.hashtiyeh = new HashtiyehUI();
     this.onboarding = new OnboardingUI();
     this.palace = new Palace();
+    this.registry = new VerificationRegistry();
     this.currentArticle = null;
 
     this.init();
@@ -281,6 +283,9 @@ class DanaApp {
     const config = this.palace.getRoomConfig();
     if (label) label.textContent = `${config.icon} ${config.name}`;
 
+    // Refresh flora based on verified claims
+    this.palace.refreshFlora();
+
     // Hide loading, start render loop
     if (loading) loading.style.display = 'none';
     this.palace.start();
@@ -402,69 +407,101 @@ class DanaApp {
     const container = document.getElementById('claims-container');
     if (!container) return;
 
-    container.innerHTML = claims.map((claim, i) => `
-      <div class="claim" data-index="${i}" id="claim-${i}">
-        <p class="claim__text"><strong>${t('claim.prefix')} ${i + 1}:</strong> ${claim.text}</p>
-        <div class="claim__actions">
-          <button class="btn btn--verify-correct btn--sm" data-action="correct" data-index="${i}">
-            ${t('claim.correct')}
-          </button>
-          <button class="btn btn--verify-wrong btn--sm" data-action="wrong" data-index="${i}">
-            ${t('claim.wrong')}
-          </button>
+    container.innerHTML = claims.map((claim, i) => {
+      const record = this.registry.getRecord(claim.encounterId, claim.exchangeIndex);
+      
+      let actionsHtml = '';
+      let resultHtml = '';
+      
+      if (record) {
+        const correctText = record.status === 'supported' ? 'تایید شد (Supported)' : record.status === 'rejected' ? 'رد شد (Rejected)' : 'شواهد کافی نیست (Inconclusive)';
+        resultHtml = `
+          <div class="claim__result">
+            <div class="claim__verdict">
+              <p><strong>وضعیت ثبت شده:</strong> ${correctText}</p>
+              <p><strong>منبع:</strong> ${claim.source}</p>
+            </div>
+          </div>
+        `;
+      } else {
+        actionsHtml = `
+          <div class="claim__actions" id="claim-actions-${i}">
+            <button class="btn btn--verify-correct btn--sm" data-action="supported" data-index="${i}">تایید شد</button>
+            <button class="btn btn--verify-wrong btn--sm" data-action="rejected" data-index="${i}">رد شد</button>
+            <button class="btn btn--secondary btn--sm" data-action="inconclusive" data-index="${i}">شواهد کافی نیست</button>
+          </div>
+          <div class="claim__result" id="claim-result-${i}" hidden></div>
+        `;
+      }
+
+      return `
+        <div class="claim" data-index="${i}" id="claim-${i}">
+          <p class="claim__text"><strong>${t('claim.prefix')} ${i + 1}:</strong> ${claim.text}</p>
+          ${actionsHtml}
+          ${resultHtml}
         </div>
-        <div class="claim__result" id="claim-result-${i}" hidden></div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     container.querySelectorAll('.claim__actions button').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const index = parseInt(e.target.dataset.index);
         const action = e.target.dataset.action;
-        this.verifyClaim(index, action === 'correct');
+        this.verifyClaim(index, action);
       });
     });
 
-    document.getElementById('btn-verify-all')?.addEventListener('click', () => {
-      this.showAllVerifications(claims);
-    });
+    const verifyAllBtn = document.getElementById('btn-verify-all');
+    if (verifyAllBtn) verifyAllBtn.hidden = true;
   }
 
-  verifyClaim(index, childSaysCorrect) {
+  verifyClaim(index, action) {
     if (!this.currentArticle || !this.currentArticle.claims) return;
 
     const claim = this.currentArticle.claims[index];
     const resultEl = document.getElementById(`claim-result-${index}`);
     if (!resultEl) return;
 
-    const wasCaught = childSaysCorrect !== claim.correct;
+    // Record in registry
+    this.registry.record(claim.encounterId, claim.exchangeIndex, claim.courseId, action, this.currentArticle.id);
 
-    const resultLabel = getLang() === 'en' ? 'Result:' : 'نتیجه:';
-    const sourceLabel = getLang() === 'en' ? 'Source:' : 'منبع:';
-    const correctText = claim.correct ? t('claim.correct') : t('claim.wrong');
+    // Auto-generate Hashtiyeh note
+    let hashtiyehText = '';
+    if (action === 'supported') hashtiyehText = `من این ادعا را بررسی و تایید کردم: "${claim.text}"`;
+    else if (action === 'rejected') hashtiyehText = `من مچ دلقک را گرفتم! این ادعا رد شد: "${claim.text}"`;
+    else hashtiyehText = `بررسی ادعا بی‌نتیجه بود: "${claim.text}"`;
 
+    this.hashtiyeh.getEngine().addAnnotation(this.currentArticle.id, {
+      text: hashtiyehText,
+      selectedText: '',
+      type: action === 'rejected' ? 'correction' : 'note',
+      author: 'من'
+    });
+    
+    this.garden.recordVerification();
+    
+    if (this.hashtiyeh.isOpen) {
+      this.hashtiyeh.render();
+    } else {
+      this.toggleHashtiyeh();
+    }
+
+    const correctText = action === 'supported' ? 'تایید شد' : action === 'rejected' ? 'رد شد' : 'شواهد کافی نیست';
+    
     resultEl.hidden = false;
     resultEl.innerHTML = `
-      <div class="claim__verdict ${wasCaught ? 'claim__verdict--caught' : ''}">
-        <p><strong>${resultLabel}</strong> ${correctText}</p>
-        <p><strong>${sourceLabel}</strong> ${claim.source}</p>
-        ${wasCaught && !claim.correct ? `<p class="claim__reward">${t('claim.reward')}</p>` : ''}
+      <div class="claim__verdict">
+        <p><strong>وضعیت ثبت شده:</strong> ${correctText}</p>
+        <p><strong>منبع:</strong> ${claim.source}</p>
       </div>
     `;
 
-    this.garden.recordVerification();
-
-    const claimActions = resultEl.previousElementSibling;
+    const claimActions = document.getElementById(`claim-actions-${index}`);
     if (claimActions) claimActions.hidden = true;
   }
 
   showAllVerifications(claims) {
-    claims.forEach((_, i) => {
-      const resultEl = document.getElementById(`claim-result-${i}`);
-      if (resultEl && resultEl.hidden) {
-        this.verifyClaim(i, true);
-      }
-    });
+    // Deprecated in new verification loop
   }
 
   startJesterEncounter() {
@@ -536,6 +573,7 @@ class DanaApp {
 
     if (!dialogue || !actions) return;
 
+    const record = this.registry.getRecord(exchange.encounterId, exchange.exchangeIndex);
     const claimLabel = getLang() === 'en' ? 'Claim:' : 'ادعا:';
 
     dialogue.innerHTML = `
@@ -552,80 +590,64 @@ class DanaApp {
       </div>
     `;
 
+    if (record) {
+      const correctText = record.status === 'supported' ? 'تایید شد' : record.status === 'rejected' ? 'رد شد' : 'شواهد کافی نیست';
+      dialogue.innerHTML += `
+        <div class="dialogue__exchange dialogue__exchange--response">
+          <div class="dialogue__child">
+            <div class="dialogue__bubble dialogue__bubble--child">
+              <p>من قبلاً این را بررسی کردم. وضعیت: ${correctText}</p>
+            </div>
+          </div>
+          <div class="dialogue__jester">
+            <div class="dialogue__avatar">⚖️</div>
+            <div class="dialogue__bubble">
+              <p>بسیار عالی! تو یک محقق واقعی هستی.</p>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      this.jester.exchangeIndex++; // advance Jester state internally
+      const isComplete = this.jester.isEncounterComplete();
+      
+      if (isComplete) {
+        actions.innerHTML = `
+          <button class="btn btn--primary" id="btn-jester-done">
+            ${t('jester.done')}
+          </button>
+        `;
+        document.getElementById('btn-jester-done')?.addEventListener('click', () => {
+          this.jester.reset();
+          this.renderEncounterList();
+        });
+      } else {
+        actions.innerHTML = `
+          <button class="btn btn--primary" id="btn-jester-next">
+            ${t('jester.next')}
+          </button>
+        `;
+        document.getElementById('btn-jester-next')?.addEventListener('click', () => {
+          this.renderJesterExchange(this.jester.getCurrentExchange());
+        });
+      }
+      return;
+    }
+
     actions.innerHTML = `
-      <button class="btn btn--verify-correct" id="btn-say-correct">
-        ${t('claim.correct')}
-      </button>
-      <button class="btn btn--verify-wrong" id="btn-say-wrong">
-        ${t('claim.wrong')}
+      <button class="btn btn--primary" id="btn-investigate-source">
+        🔍 ${getLang() === 'en' ? 'Investigate Source' : 'بررسی منبع'}
       </button>
     `;
 
-    document.getElementById('btn-say-correct')?.addEventListener('click', () => {
-      this.verifyJesterClaim(true);
-    });
-
-    document.getElementById('btn-say-wrong')?.addEventListener('click', () => {
-      this.verifyJesterClaim(false);
+    document.getElementById('btn-investigate-source')?.addEventListener('click', () => {
+      this.router.navigate('reading');
+      this.selectArticle(exchange.sourceArticleId);
     });
   }
 
   verifyJesterClaim(childSaysCorrect) {
-    const result = this.jester.verify(childSaysCorrect);
-    if (!result) return;
-
-    const dialogue = document.getElementById('jester-dialogue');
-    const actions = document.getElementById('jester-actions');
-
-    if (!dialogue || !actions) return;
-
-    const resultLabel = getLang() === 'en' ? 'Result:' : 'نتیجه:';
-    const sourceLabel = getLang() === 'en' ? 'Source:' : 'منبع:';
-
-    dialogue.innerHTML += `
-      <div class="dialogue__exchange dialogue__exchange--response">
-        <div class="dialogue__child">
-          <div class="dialogue__bubble dialogue__bubble--child">
-            <p>${childSaysCorrect ? t('jester.yes') : t('jester.no')}</p>
-          </div>
-        </div>
-        <div class="dialogue__jester">
-          <div class="dialogue__avatar">⚖️</div>
-          <div class="dialogue__bubble">
-            <p>${result.jesterResponse}</p>
-          </div>
-        </div>
-        <div class="dialogue__verification">
-          <p><strong>${resultLabel}</strong> ${result.verification.verdict}</p>
-          <p><strong>${sourceLabel}</strong> ${result.verification.found}</p>
-        </div>
-      </div>
-    `;
-
-    this.garden.recordVerification();
-
-    if (result.isComplete) {
-      actions.innerHTML = `
-        <button class="btn btn--primary" id="btn-jester-done">
-          ${t('jester.done')}
-        </button>
-      `;
-      document.getElementById('btn-jester-done')?.addEventListener('click', () => {
-        this.jester.reset();
-        this.renderEncounterList();
-      });
-    } else if (result.nextExchange) {
-      actions.innerHTML = `
-        <button class="btn btn--primary" id="btn-jester-next">
-          ${t('jester.next')}
-        </button>
-      `;
-      document.getElementById('btn-jester-next')?.addEventListener('click', () => {
-        this.renderJesterExchange(result.nextExchange);
-      });
-    }
-
-    dialogue.scrollTop = dialogue.scrollHeight;
+    // Deprecated in new verification loop
   }
 
   async initZimReader() {

@@ -9,9 +9,7 @@
   <title>Dana | دانا</title>
 
   <!-- Fonts: Vazirmatn (Persian), Sahel (fallback), Georgia (English) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- Loaded locally via main.css for offline support -->
 
   <!-- App styles -->
   <link rel="stylesheet" href="/css/main.css">
@@ -165,13 +163,14 @@
   </div>
 
   <!-- App scripts -->
-  <script type="module" src="/src/core/app.js?v=4"></script>
+  <script type="module" src="/src/core/app.js"></script>
   <script>
-    // Unregister any old service worker immediately
+    // Register service worker for offline-first caching
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(r => r.unregister());
-        console.log('[Dana] Old service workers unregistered');
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => console.log('[Dana] Service worker registered, scope:', reg.scope))
+          .catch(err => console.warn('[Dana] Service worker registration failed:', err));
       });
     }
   </script>
