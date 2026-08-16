@@ -19,6 +19,8 @@
  * Three.js is dynamically imported — loaded only when the palace opens.
  */
 
+import { VerificationRegistry } from '../verification/registry.js';
+
 let THREE = null;
 let EffectComposer = null;
 let RenderPass = null;
@@ -160,6 +162,16 @@ export class Palace {
       }
     }
 
+    // Ensure canvas has dimensions (CSS layout may not be ready)
+    if (!canvas.clientWidth || !canvas.clientHeight) {
+      console.warn('[Palace] Canvas has zero dimensions, retrying in 100ms...');
+      await new Promise(r => setTimeout(r, 100));
+      if (!canvas.clientWidth || !canvas.clientHeight) {
+        console.error('[Palace] Canvas still has zero dimensions after retry');
+        return;
+      }
+    }
+
     this.canvas = canvas;
 
     // Scene
@@ -176,13 +188,20 @@ export class Palace {
     this.updateCameraPosition();
 
     // Renderer — preserveDrawingBuffer false for performance
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: false,
-      powerPreference: 'low-power',
-    });
+    try {
+      this.renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: false,
+        powerPreference: 'low-power',
+      });
+      console.log('[Palace] WebGL renderer created');
+    } catch (err) {
+      console.error('[Palace] WebGL renderer failed:', err);
+      return;
+    }
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    console.log(`[Palace] Canvas size: ${canvas.clientWidth}x${canvas.clientHeight}`);
 
     // Single directional light — warm, low intensity
     // "No real-time lights." Lighting is vertex-shaded via MeshLambertMaterial;
@@ -200,6 +219,10 @@ export class Palace {
 
     // Build the Chahar Bagh room
     this.buildRoom();
+
+    // === Dynamic flora layer ===
+    this.floraGroup = new THREE.Group();
+    this.scene.add(this.floraGroup);
 
     // Interactive room nodes above each quadrant (instanced)
     this.buildRoomNodes();
@@ -983,6 +1006,10 @@ export class Palace {
    */
   animate() {
     if (!this.isActive) return;
+    if (!this.renderer || !this.scene || !this.camera) {
+      console.error('[Palace] Missing renderer/scene/camera in animate');
+      return;
+    }
 
     this.animationId = requestAnimationFrame((t) => this.animateFrame(t));
   }
@@ -1123,7 +1150,12 @@ export class Palace {
     this.isActive = true;
     this.clock.start();
     this._lastFrameTime = 0;
-    this.animate();
+    this.refreshFlora();
+    // Ensure renderer has correct dimensions after layout
+    requestAnimationFrame(() => {
+      this.onResize();
+      this.animate();
+    });
     console.log('[Palace] Started');
   }
 
@@ -1145,8 +1177,10 @@ export class Palace {
   onResize() {
     if (!this.canvas || !this.camera || !this.renderer) return;
 
-    const width = this.canvas.clientWidth;
-    const height = this.canvas.clientHeight;
+    const width = this.canvas.clientWidth || window.innerWidth;
+    const height = this.canvas.clientHeight || (window.innerHeight - 56);
+
+    if (width === 0 || height === 0) return;
 
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
@@ -1212,6 +1246,58 @@ export class Palace {
     }
 
     console.log(`[Palace] Loaded room: ${course.name}`);
+  }
+
+  /**
+   * Refreshes the flora (trees) based on verified claims
+   */
+  refreshFlora() {
+    if (!this.scene || !this.floraGroup || !THREE) return;
+
+    // Clear existing
+    while(this.floraGroup.children.length > 0) { 
+        this.floraGroup.remove(this.floraGroup.children[0]); 
+    }
+
+    const registry = new VerificationRegistry();
+    const treeMat = new THREE.MeshLambertMaterial({ color: 0x1a4a1a });
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
+    
+    // Same offsets used for quadrants
+    const offsets = [
+      [-FLOOR_SIZE / 4 - 0.5, -FLOOR_SIZE / 4 - 0.5], // nature
+      [FLOOR_SIZE / 4 + 0.5, -FLOOR_SIZE / 4 - 0.5],  // math
+      [-FLOOR_SIZE / 4 - 0.5, FLOOR_SIZE / 4 + 0.5],  // literacy
+      [FLOOR_SIZE / 4 + 0.5, FLOOR_SIZE / 4 + 0.5],   // connection
+    ];
+
+    COURSE_NODES.forEach((course, i) => {
+      const count = registry.getResolvedCountForCourse(course.id);
+      const [centerX, centerZ] = offsets[i];
+      
+      // We use a deterministic random seed based on course + index 
+      // to prevent trees from jumping around every time we refresh
+      const seed = i * 100;
+      const pseudoRandom = (offset) => {
+          const x = Math.sin(seed + offset) * 10000;
+          return x - Math.floor(x);
+      };
+      
+      for(let j = 0; j < count; j++) {
+        const x = centerX + (pseudoRandom(j*2) - 0.5) * 3;
+        const z = centerZ + (pseudoRandom(j*2+1) - 0.5) * 3;
+        const scale = 0.5 + pseudoRandom(j*3) * 0.5;
+
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1*scale, 0.15*scale, 1.2*scale, 5), trunkMat);
+        trunk.position.set(x, 0.6*scale, z);
+        this.floraGroup.add(trunk);
+
+        const crown = new THREE.Mesh(new THREE.ConeGeometry(0.6*scale, 1.5*scale, 6), treeMat);
+        crown.position.set(x, 1.9*scale, z);
+        this.floraGroup.add(crown);
+      }
+    });
+    console.log('[Palace] Flora refreshed from registry');
   }
 
   /**
