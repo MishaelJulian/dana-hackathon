@@ -8,8 +8,8 @@
 
   <title>Dana | دانا</title>
 
-  <!-- Fonts: Vazirmatn (Persian), self-hosted for true offline-first -->
-  <link rel="stylesheet" href="/css/fonts.css">
+  <!-- Fonts: Vazirmatn (Persian), Sahel (fallback), Georgia (English) -->
+  <!-- Loaded locally via main.css for offline support -->
 
   <!-- App styles -->
   <link rel="stylesheet" href="/css/main.css">
@@ -163,14 +163,14 @@
   </div>
 
   <!-- App scripts -->
-  <script type="module" src="/src/core/app.js?v=4"></script>
+  <script type="module" src="/src/core/app.js"></script>
   <script>
-    // Register the service worker for offline-first support
+    // Register service worker for offline-first caching
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch((err) => {
-          console.warn('[Dana] Service worker registration failed:', err);
-        });
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => console.log('[Dana] Service worker registered, scope:', reg.scope))
+          .catch(err => console.warn('[Dana] Service worker registration failed:', err));
       });
     }
   </script>

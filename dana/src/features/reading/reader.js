@@ -1,68 +1,150 @@
 /**
- * reader.js — ZIM file reader
+ * reader.js — Offline Reader (Provider Pattern)
  * Demo mode with curated Persian content for hackathon presentation
- * Real ZIM/Kiwix integration via Service Worker when ZIM file is present
+ * Real offline corpus integration via JsonProvider
  */
+
+import { Jester } from '../jester/jester.js';
 
 export class ZimReader {
   constructor() {
-    this.articleList = [];
-    this.currentArticle = null;
-    this.externalArticles = null; // set when a library file is loaded at runtime
+    this.provider = null;
   }
 
   /**
-   * Load an offline library file chosen at runtime — works with no rebuild, no network.
-   * Supports Dana bundle (.json: [{title, course, html, claims?}]) now; detects a real
-   * .zim by its magic number and hands off to the ZIM reader integration point.
+   * Load an offline library file at runtime (Dana .json bundle now; detects .zim).
+   * Swaps the active provider to serve the loaded articles. No rebuild, no network.
    * @param {File} file
    * @returns {Promise<number>} article count loaded
    */
   async loadFile(file) {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    // ZIM magic number 0x044D495A → little-endian bytes 5A 49 4D 04
+    // ZIM magic 0x044D495A → little-endian 5A 49 4D 04
     const isZim = bytes[0] === 0x5A && bytes[1] === 0x49 && bytes[2] === 0x4D && bytes[3] === 0x04;
-    if (isZim) {
-      // Real ZIM detected. Header/URL-pointer parse is straightforward; cluster payloads are
-      // zstd/lzma-compressed, which browsers can't decode natively — that step needs the kiwix
-      // libzim WASM reader (integration point). Surface clearly instead of failing silently.
-      throw new Error('ZIM_NEEDS_READER');
-    }
+    if (isZim) throw new Error('ZIM_NEEDS_READER');
     const data = JSON.parse(new TextDecoder().decode(bytes));
     const articles = Array.isArray(data) ? data : data.articles;
     if (!Array.isArray(articles) || articles.length === 0) throw new Error('BAD_BUNDLE');
-    this.externalArticles = articles;
-    this.articleList = articles.map((a, i) => ({
-      id: 'x' + i, title: a.title, course: a.course || 'all', url: '',
-    }));
-    return this.articleList.length;
+    this.provider = new BundleProvider(articles);
+    return this.provider.getArticleCount();
   }
 
   async init() {
-    const zimPath = '/zim/wikipedia_fa_mini.zim';
+    // Try to initialize the real offline corpus
+    const jsonProvider = new JsonProvider();
+    const isCorpusAvailable = await jsonProvider.init();
 
-    try {
-      const response = await fetch(zimPath);
-      // Check it's actually a binary ZIM file, not Vite's HTML fallback
-      const contentType = response.headers.get('content-type') || '';
-      if (!response.ok || contentType.includes('text/html')) {
-        throw new Error('ZIM not found');
-      }
-      console.log('[ZimReader] ZIM file found — production mode');
-      // Production ZIM parsing would go here
-    } catch {
-      console.log('[ZimReader] Demo mode — curated content');
-      this.loadDemoContent();
+    if (isCorpusAvailable) {
+      console.log('[ZimReader] Offline Corpus found — using JsonProvider');
+      this.provider = jsonProvider;
+    } else {
+      console.log('[ZimReader] Corpus not found — using DemoProvider fallback');
+      this.provider = new DemoProvider();
+      await this.provider.init();
     }
   }
 
-  loadDemoContent() {
+  search(query) {
+    return this.provider.search(query);
+  }
+
+  async getArticle(articleId) {
+    return this.provider.getArticle(articleId);
+  }
+
+  getArticleCount() {
+    return this.provider.getArticleCount();
+  }
+
+  isReady() {
+    return this.provider && this.provider.isReady();
+  }
+}
+
+export class JsonProvider {
+  constructor() {
+    this.corpusPath = '/corpus.json';
+    this.articles = [];
+  }
+
+  async init() {
+    try {
+      const response = await fetch(this.corpusPath);
+      if (!response.ok) return false;
+      this.articles = await response.json();
+      return this.articles.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  search(query) {
+    if (!query || query.trim() === '') return this.articles;
+    const q = query.trim().toLowerCase();
+    return this.articles.filter(a => a.title.toLowerCase().includes(q) || a.text.toLowerCase().includes(q));
+  }
+
+  async getArticle(articleId) {
+    const article = this.articles.find(a => a.id === articleId || a.title === articleId);
+    if (!article) throw new Error(`Article not found: ${articleId}`);
+
+    // Generate attribution footer
+    const attributionHtml = `
+      <div class="article-attribution" style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; font-size: 0.85em; color: #666; direction: rtl;">
+        <p><strong>منبع:</strong> ${article.source} — <a href="${article.sourceUrl}" target="_blank" rel="noopener noreferrer">مشاهده نسخه اصلی</a></p>
+        <p><strong>مجوز:</strong> محتوا تحت مجوز <a href="${article.licenseUrl}" target="_blank" rel="noopener noreferrer">${article.license}</a> در دسترس است.</p>
+      </div>
+    `;
+
+    // Extract claims deterministically from Jester using explicit sourceArticleId
+    let jesterClaims = [];
+    const jester = new Jester();
+    for (const encounter of jester.encounters) {
+      encounter.exchanges.forEach((exchange, index) => {
+        if (exchange.sourceArticleId === article.id) {
+          jesterClaims.push({
+            encounterId: encounter.id,
+            exchangeIndex: index,
+            courseId: encounter.trigger.split(':')[1] || 'nature',
+            text: exchange.claim,
+            correct: exchange.correct,
+            source: `${exchange.verification.verdict} — ${exchange.verification.found}`
+          });
+        }
+      });
+    }
+
+    return {
+      id: article.id,
+      title: article.title,
+      html: article.html + attributionHtml,
+      lastModified: new Date().toISOString(),
+      claims: jesterClaims
+    };
+  }
+
+  getArticleCount() {
+    return this.articles.length;
+  }
+
+  isReady() {
+    return this.articles.length > 0;
+  }
+}
+
+export class DemoProvider {
+  constructor() {
+    this.articleList = [];
+  }
+
+  async init() {
     this.articleList = DEMO_ARTICLES.map((a, i) => ({
       id: String(i + 1),
       title: a.title,
       course: a.course,
       url: `/wiki/${a.title}`,
     }));
+    return true;
   }
 
   search(query) {
@@ -72,19 +154,6 @@ export class ZimReader {
   }
 
   async getArticle(articleId) {
-    // Runtime-loaded library takes precedence
-    if (this.externalArticles && articleId.startsWith('x')) {
-      const a = this.externalArticles[Number(articleId.slice(1))];
-      if (!a) throw new Error(`Article not found: ${articleId}`);
-      return {
-        id: articleId,
-        title: a.title,
-        html: a.html || genericArticle(a.title),
-        lastModified: new Date().toISOString(),
-        claims: a.claims || [],
-      };
-    }
-
     const meta = this.articleList.find(a => a.id === articleId);
     if (!meta) throw new Error(`Article not found: ${articleId}`);
 
@@ -94,7 +163,7 @@ export class ZimReader {
       title: meta.title,
       html: demo ? demo.html : genericArticle(meta.title),
       lastModified: new Date().toISOString(),
-      claims: demo?.claims || [],
+      claims: demo?.claims || [], // Hardcoded claims for demo
     };
   }
 
@@ -105,6 +174,29 @@ export class ZimReader {
   isReady() {
     return this.articleList.length > 0;
   }
+}
+
+
+
+// Runtime-loaded library bundle (from ZimReader.loadFile) — a third provider.
+export class BundleProvider {
+  constructor(articles) {
+    this.articles = articles;
+    this.list = articles.map((a, i) => ({ id: 'x' + i, title: a.title, course: a.course || 'all', url: '' }));
+  }
+  async init() { return true; }
+  search(query) {
+    if (!query || !query.trim()) return this.list;
+    const q = query.trim().toLowerCase();
+    return this.list.filter(a => a.title.toLowerCase().includes(q));
+  }
+  async getArticle(articleId) {
+    const a = this.articles[Number(String(articleId).replace(/^x/, ''))];
+    if (!a) throw new Error(`Article not found: ${articleId}`);
+    return { id: articleId, title: a.title, html: a.html || genericArticle(a.title), lastModified: new Date().toISOString(), claims: a.claims || [] };
+  }
+  getArticleCount() { return this.list.length; }
+  isReady() { return this.list.length > 0; }
 }
 
 function genericArticle(title) {
