@@ -4,15 +4,11 @@
  * ZIM files are large and loaded separately via fetch (not cached in SW)
  */
 
-const CACHE_NAME = 'dana-v4';
+const CACHE_NAME = 'dana-v6';
 // Precache only paths stable across dev and a Vite production build (build
 // output hashes JS chunk filenames, so they can't be hardcoded here). JS/CSS
 // module chunks still end up offline-capable: the generic fetch handler
-// below caches every same-origin GET the first time it's fetched online, and
-// a normal app visit fetches every chunk it needs before the user ever goes
-// offline. ponytail: relies on cache-on-first-visit rather than a build-time
-// manifest plugin (e.g. vite-plugin-pwa) — upgrade to that if precache needs
-// to survive without a full first visit.
+// below caches every same-origin GET the first time it's fetched online.
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -21,12 +17,12 @@ const STATIC_ASSETS = [
   '/css/rtl.css',
   '/css/eink.css',
   '/css/palace.css',
-  '/css/fonts.css',
-  '/fonts/Vazirmatn-Regular.ttf',
-  '/fonts/Vazirmatn-Medium.ttf',
-  '/fonts/Vazirmatn-Bold.ttf',
+  '/fonts/vazirmatn-latin.woff2',
+  '/fonts/vazirmatn-latin-ext.woff2',
+  '/fonts/vazirmatn-arabic.woff2',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/corpus.json'
 ];
 
 // Install: cache all static assets
@@ -84,7 +80,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets (incl. self-hosted fonts): cache-first
+  // Static assets: cache-first
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
