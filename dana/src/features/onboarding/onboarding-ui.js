@@ -87,18 +87,25 @@ export class OnboardingUI {
   }
 
   renderInput(step) {
+    const val = this.engine.state.answers[step.field] || '';
     return `
-      <h2 class="onboarding__title">${step.title}</h2>
+      <h2 class="onboarding__title">${step.title} <span class="form-required" aria-hidden="true">*</span></h2>
       <p class="onboarding__text">${step.text}</p>
       <input
         type="text"
         id="onboarding-input"
         class="onboarding__input"
         placeholder="${step.placeholder || ''}"
-        value="${this.engine.state.answers[step.field] || ''}"
+        value="${val}"
         aria-label="${step.title}"
+        maxlength="24"
+        autocomplete="off"
         autofocus
       >
+      <div class="form-meta">
+        <span class="form-hint" id="onboarding-hint" role="status"></span>
+        <span class="form-count" id="onboarding-count">${val.length}/24</span>
+      </div>
       <button class="btn btn--primary onboarding__next" id="btn-onboarding-next" disabled>
         ادامه
       </button>
@@ -161,7 +168,12 @@ export class OnboardingUI {
 
     if (step.type === 'input' && input) {
       input.addEventListener('input', () => {
-        if (nextBtn) nextBtn.disabled = input.value.trim().length === 0;
+        const len = input.value.trim().length;
+        if (nextBtn) nextBtn.disabled = len === 0;
+        const count = document.getElementById('onboarding-count');
+        if (count) count.textContent = `${input.value.length}/24`;
+        const hint = document.getElementById('onboarding-hint');
+        if (hint) hint.textContent = (input.value.length > 0 && len === 0) ? 'فقط فاصله کافی نیست' : '';
       });
 
       input.addEventListener('keydown', (e) => {

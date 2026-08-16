@@ -8,6 +8,34 @@ export class ZimReader {
   constructor() {
     this.articleList = [];
     this.currentArticle = null;
+    this.externalArticles = null; // set when a library file is loaded at runtime
+  }
+
+  /**
+   * Load an offline library file chosen at runtime — works with no rebuild, no network.
+   * Supports Dana bundle (.json: [{title, course, html, claims?}]) now; detects a real
+   * .zim by its magic number and hands off to the ZIM reader integration point.
+   * @param {File} file
+   * @returns {Promise<number>} article count loaded
+   */
+  async loadFile(file) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // ZIM magic number 0x044D495A → little-endian bytes 5A 49 4D 04
+    const isZim = bytes[0] === 0x5A && bytes[1] === 0x49 && bytes[2] === 0x4D && bytes[3] === 0x04;
+    if (isZim) {
+      // Real ZIM detected. Header/URL-pointer parse is straightforward; cluster payloads are
+      // zstd/lzma-compressed, which browsers can't decode natively — that step needs the kiwix
+      // libzim WASM reader (integration point). Surface clearly instead of failing silently.
+      throw new Error('ZIM_NEEDS_READER');
+    }
+    const data = JSON.parse(new TextDecoder().decode(bytes));
+    const articles = Array.isArray(data) ? data : data.articles;
+    if (!Array.isArray(articles) || articles.length === 0) throw new Error('BAD_BUNDLE');
+    this.externalArticles = articles;
+    this.articleList = articles.map((a, i) => ({
+      id: 'x' + i, title: a.title, course: a.course || 'all', url: '',
+    }));
+    return this.articleList.length;
   }
 
   async init() {
@@ -44,6 +72,19 @@ export class ZimReader {
   }
 
   async getArticle(articleId) {
+    // Runtime-loaded library takes precedence
+    if (this.externalArticles && articleId.startsWith('x')) {
+      const a = this.externalArticles[Number(articleId.slice(1))];
+      if (!a) throw new Error(`Article not found: ${articleId}`);
+      return {
+        id: articleId,
+        title: a.title,
+        html: a.html || genericArticle(a.title),
+        lastModified: new Date().toISOString(),
+        claims: a.claims || [],
+      };
+    }
+
     const meta = this.articleList.find(a => a.id === articleId);
     if (!meta) throw new Error(`Article not found: ${articleId}`);
 

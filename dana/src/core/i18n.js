@@ -25,9 +25,9 @@ const translations = {
 
     // Course filters
     'course.all': 'همه',
-    'course.nature': '🌿 طبیعت',
-    'course.digital': '📱 رسانه',
-    'course.math': '🔢 ریاضی',
+    'course.nature': 'طبیعت',
+    'course.digital': 'رسانه',
+    'course.math': 'ریاضی',
 
     // Claims
     'claim.prefix': 'ادعا',
@@ -94,9 +94,9 @@ const translations = {
 
     // Course filters
     'course.all': 'All',
-    'course.nature': '🌿 Nature',
-    'course.digital': '📱 Media',
-    'course.math': '🔢 Math',
+    'course.nature': 'Nature',
+    'course.digital': 'Media',
+    'course.math': 'Math',
 
     // Claims
     'claim.prefix': 'Claim',
@@ -138,7 +138,7 @@ const translations = {
     'onboarding.next': 'Next',
 
     // Misc
-    'lang.toggle': 'فارسی',
+    'lang.toggle': 'فا',
     'theme.toggle': '☀️',
   }
 };

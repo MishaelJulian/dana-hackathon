@@ -4,7 +4,7 @@
  * ZIM files are large and loaded separately via fetch (not cached in SW)
  */
 
-const CACHE_NAME = 'dana-v3';
+const CACHE_NAME = 'dana-v4';
 // Precache only paths stable across dev and a Vite production build (build
 // output hashes JS chunk filenames, so they can't be hardcoded here). JS/CSS
 // module chunks still end up offline-capable: the generic fetch handler
