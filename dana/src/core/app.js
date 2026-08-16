@@ -4,6 +4,9 @@
  */
 
 import { Router } from './router.js';
+import { startLoading, showEmpty, showError } from './states.js';
+import { typewrite } from './motion.js';
+import { icon, iconEl } from './icons.js';
 import { ZimReader } from '../features/reading/reader.js';
 import { EinkMode } from '../features/reading/eink.js';
 import { Jester } from '../features/jester/jester.js';
@@ -38,6 +41,8 @@ class DanaApp {
     this.setupToggles();
     this.setupReadingScreen();
     this.setupHashtiyeh();
+    this.setupEscapeClose();
+    this.setupViewToggle();
     this.updateUITranslations();
 
     this.router.register('landing', () => this.showScreen('screen-landing'));
@@ -111,7 +116,7 @@ class DanaApp {
     const btnTheme = document.getElementById('btn-theme');
     if (btnTheme) {
       const isDark = document.documentElement.classList.contains('dark');
-      btnTheme.textContent = isDark ? '☀️' : '🌙';
+      btnTheme.replaceChildren(iconEl(isDark ? 'sun' : 'moon'));
       btnTheme.setAttribute('aria-label', isDark ? 'Light mode' : 'حالت تاریک');
     }
   }
@@ -134,12 +139,16 @@ class DanaApp {
 
     // Course filters
     const courseFilters = document.querySelectorAll('.btn--course');
-    if (courseFilters.length >= 4) {
-      courseFilters[0].textContent = t('course.all');
-      courseFilters[1].textContent = t('course.nature');
-      courseFilters[2].textContent = t('course.digital');
-      courseFilters[3].textContent = t('course.math');
-    }
+    const courseIcons = [null, 'leaf', 'media', 'geometry'];
+    const courseKeys = ['course.all', 'course.nature', 'course.digital', 'course.math'];
+    courseFilters.forEach((btn, i) => {
+      if (i > 3) return;
+      const label = document.createElement('span');
+      label.className = 'btn--course-label';
+      label.textContent = t(courseKeys[i]);
+      const kids = courseIcons[i] ? [iconEl(courseIcons[i], { size: 18 }), label] : [label];
+      btn.replaceChildren(...kids);
+    });
 
     // Search
     const searchInput = document.getElementById('search-input');
@@ -178,6 +187,7 @@ class DanaApp {
     if (!articleList || !searchInput) return;
 
     this.currentCourse = 'all';
+    this.setupLibraryLoader(articleList, searchInput);
     this.renderArticleList(articleList, '');
 
     searchInput.addEventListener('input', (e) => {
@@ -197,6 +207,53 @@ class DanaApp {
     }
   }
 
+  // Runtime library loader — drop a Dana bundle (.json) or a .zim to swap the offline
+  // library live, no rebuild, no network. Feedback flows through the state-system.
+  setupLibraryLoader(articleList, searchInput) {
+    const search = document.querySelector('.reading__search');
+    if (!search || document.getElementById('library-file')) return;
+
+    const label = document.createElement('label');
+    label.className = 'btn btn--course reading__load';
+    label.setAttribute('role', 'button');
+    label.setAttribute('aria-label', 'بارگذاری فایل کتابخانه');
+    const span = document.createElement('span');
+    span.className = 'btn--course-label';
+    span.textContent = 'بارگذاری کتابخانه';
+    label.append(iconEl('library', { size: 18 }), span);
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.zim,application/json';
+    input.className = 'sr-only';
+    input.id = 'library-file';
+    label.appendChild(input);
+
+    input.addEventListener('change', async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const content = document.getElementById('reading-content');
+      const loader = content ? startLoading(content, { label: 'در حال باز کردن کتابخانه…' }) : null;
+      try {
+        const n = await this.zimReader.loadFile(file);
+        loader?.done();
+        this.currentCourse = 'all';
+        this.currentArticle = null;
+        this.renderArticleList(articleList, searchInput.value);
+        if (content) showEmpty(content, { title: `${n} مقاله بارگذاری شد`, hint: 'یک مقاله را انتخاب کن' });
+      } catch (err) {
+        loader?.done();
+        const msg = err.message === 'ZIM_NEEDS_READER'
+          ? { title: 'فایل ZIM شناسایی شد', hint: 'خواندن مستقیم ZIM به‌زودی اضافه می‌شود؛ فعلاً از فایل کتابخانهٔ دانا (JSON) استفاده کن.' }
+          : { title: 'این فایل باز نشد', hint: 'یک فایل کتابخانهٔ معتبر انتخاب کن.' };
+        if (content) showError(content, msg); else console.error('[Dana] library load:', err);
+      }
+      input.value = '';
+    });
+
+    search.parentElement.insertBefore(label, search);
+  }
+
   setupHashtiyeh() {
     // Create toggle button for Hashtiyeh panel
     const readingSection = document.getElementById('screen-reading');
@@ -206,7 +263,7 @@ class DanaApp {
     toggleBtn.className = 'btn--hashtiyeh';
     toggleBtn.id = 'btn-toggle-hashtiyeh';
     toggleBtn.setAttribute('aria-label', 'حاشیه‌نویسی');
-    toggleBtn.innerHTML = '📝';
+    toggleBtn.replaceChildren(iconEl('pen'));
     readingSection.appendChild(toggleBtn);
 
     toggleBtn.addEventListener('click', () => this.toggleHashtiyeh());
@@ -215,6 +272,43 @@ class DanaApp {
     this.hashtiyeh.onAnnotationAdded = () => {
       this.garden.recordHashtiyeh();
     };
+  }
+
+  // Testing aid: toggle between full-browser view and a phone-app frame (mirrored in the APK).
+  setupViewToggle() {
+    if (document.querySelector('.view-toggle')) return;
+    const btn = document.createElement('button');
+    btn.className = 'view-toggle';
+    btn.setAttribute('aria-label', 'تغییر نمای گوشی و مرورگر');
+    const apply = () => {
+      const appMode = localStorage.getItem('dana-view') === 'app';
+      document.body.classList.toggle('app-frame', appMode);
+      btn.textContent = appMode ? 'نمای گوشی' : 'نمای مرورگر';
+    };
+    btn.addEventListener('click', () => {
+      const next = localStorage.getItem('dana-view') === 'app' ? 'browser' : 'app';
+      localStorage.setItem('dana-view', next);
+      apply();
+    });
+    document.body.appendChild(btn);
+    apply();
+  }
+
+  // Escape closes whichever popover is open, restoring focus to its trigger (WCAG 2.1.2 / 2.4.3)
+  setupEscapeClose() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const nodeInfo = document.getElementById('palace-node-info');
+      if (nodeInfo && !nodeInfo.hidden) {
+        nodeInfo.hidden = true;
+        document.getElementById('palace-canvas')?.focus?.();
+        return;
+      }
+      if (this.hashtiyeh.isOpen) {
+        this.toggleHashtiyeh();
+        document.getElementById('btn-toggle-hashtiyeh')?.focus();
+      }
+    });
   }
 
   toggleHashtiyeh() {
@@ -240,6 +334,21 @@ class DanaApp {
     };
 
     this.onboarding.start(container);
+
+    // Testing skip — bypass registration during dev (persists completion)
+    if (container && !document.getElementById('btn-skip-onboarding')) {
+      const skip = document.createElement('button');
+      skip.id = 'btn-skip-onboarding';
+      skip.className = 'onboarding__skip';
+      skip.textContent = getLang() === 'en' ? 'Skip (testing)' : 'رد کردن (تست)';
+      skip.addEventListener('click', () => {
+        this.onboarding.engine.state.completed = true;
+        this.onboarding.engine.save();
+        this.garden.init();
+        this.router.navigate('landing');
+      });
+      container.appendChild(skip);
+    }
   }
 
   async startPalace() {
@@ -249,8 +358,15 @@ class DanaApp {
 
     if (!canvas) return;
 
-    // Show loading while Three.js loads
-    if (loading) loading.style.display = 'flex';
+    // Loading on the timing ladder — 3D + WASM decompression can be slow on Android Go
+    let loader = null;
+    if (loading) {
+      loading.style.display = 'flex';
+      loader = startLoading(loading, {
+        label: t('palace.loading'),
+        steps: [t('palace.loading'), 'ساخت اتاق‌های کاخ…', 'آماده‌سازی نمای سه‌بعدی…'],
+      });
+    }
 
     // Initialise on first visit
     if (!this.palace.scene) {
@@ -259,9 +375,7 @@ class DanaApp {
       // Check if init succeeded
       if (!this.palace.scene) {
         console.error('[Dana] Palace init failed');
-        if (loading) {
-          loading.innerHTML = '<p style="color: #c62828;">Failed to load 3D engine. Check console for details.</p>';
-        }
+        loader?.fail();
         return;
       }
 
@@ -282,6 +396,7 @@ class DanaApp {
     if (label) label.textContent = `${config.icon} ${config.name}`;
 
     // Hide loading, start render loop
+    loader?.done();
     if (loading) loading.style.display = 'none';
     this.palace.start();
   }
@@ -311,6 +426,15 @@ class DanaApp {
     // Filter by course
     if (this.currentCourse && this.currentCourse !== 'all') {
       articles = articles.filter(a => a.course === this.currentCourse);
+    }
+
+    // Empty state — never a blank list (children need a clear, supportive next step)
+    if (articles.length === 0) {
+      showEmpty(listElement, {
+        title: query ? 'چیزی پیدا نشد' : 'هنوز درسی اینجا نیست',
+        hint: query ? 'یک کلمهٔ دیگر را امتحان کن' : 'به‌زودی اضافه می‌شود',
+      });
+      return;
     }
 
     listElement.innerHTML = articles.map(article => `
@@ -365,13 +489,13 @@ class DanaApp {
                   <p class="verification__prompt">${t('claim.prompt')}</p>
                   <div id="claims-container"></div>
                   <button class="btn btn--verify" id="btn-verify-all" aria-label="${t('reading.verify.all')}">
-                    <span>🔍</span> ${t('reading.verify')}
+                    ${icon('search', { size: 18 })} ${t('reading.verify')}
                   </button>
                 </div>
               ` : `
                 <div class="article__verification">
                   <button class="btn btn--verify" id="btn-verify" aria-label="${t('reading.verify')}">
-                    <span>🔍</span> ${t('reading.verify')}
+                    ${icon('search', { size: 18 })} ${t('reading.verify')}
                   </button>
                 </div>
               `}
@@ -395,6 +519,13 @@ class DanaApp {
       }
     } catch (error) {
       console.error('[Dana] Failed to load article:', error);
+      const content = document.getElementById('reading-content');
+      if (content) {
+        showError(content, {
+          title: 'این مقاله باز نشد',
+          hint: 'یک مقالهٔ دیگر را انتخاب کن، یا چند لحظه بعد دوباره امتحان کن.',
+        });
+      }
     }
   }
 
@@ -489,7 +620,7 @@ class DanaApp {
 
     container.innerHTML = encounters.map(enc => `
       <button class="btn btn--encounter" data-encounter="${enc.id}">
-        <span class="encounter__icon">⚖️</span>
+        <span class="encounter__icon">${icon('scale', { size: 20 })}</span>
         <span class="encounter__topic">${getLang() === 'en' ? this.translateTopic(enc.topic) : enc.topic}</span>
         <span class="encounter__count">${enc.exchanges.length} ${t('jester.questions')}</span>
       </button>
@@ -541,7 +672,7 @@ class DanaApp {
     dialogue.innerHTML = `
       <div class="dialogue__exchange">
         <div class="dialogue__jester">
-          <div class="dialogue__avatar">⚖️</div>
+          <div class="dialogue__avatar">${icon('scale', { size: 22 })}</div>
           <div class="dialogue__bubble">
             <p>${exchange.dialogue}</p>
           </div>
@@ -551,6 +682,10 @@ class DanaApp {
         </div>
       </div>
     `;
+
+    // Jester "speaks" — typewriter reveal of his line (character voice; glossary Typewriter Matrix)
+    const jesterLine = dialogue.querySelector('.dialogue__jester .dialogue__bubble p');
+    if (jesterLine) typewrite(jesterLine, exchange.dialogue);
 
     actions.innerHTML = `
       <button class="btn btn--verify-correct" id="btn-say-correct">
@@ -590,7 +725,7 @@ class DanaApp {
           </div>
         </div>
         <div class="dialogue__jester">
-          <div class="dialogue__avatar">⚖️</div>
+          <div class="dialogue__avatar">${icon('scale', { size: 22 })}</div>
           <div class="dialogue__bubble">
             <p>${result.jesterResponse}</p>
           </div>
@@ -654,6 +789,9 @@ class DanaApp {
     const target = document.getElementById(screenId);
     if (target) {
       target.classList.add('screen--active');
+      // Move focus to the new screen so keyboard/SR users track the change (WCAG 2.4.3)
+      target.setAttribute('tabindex', '-1');
+      target.focus({ preventScroll: true });
     }
 
     const btnBack = document.getElementById('btn-back');

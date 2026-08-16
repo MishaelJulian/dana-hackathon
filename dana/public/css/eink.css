@@ -34,9 +34,12 @@ body.eink-mode .reading__list li[aria-selected="true"] {
 
 /* --- Typography for E-ink --- */
 body.eink-mode {
-  font-family: var(--font-persian);
+  /* Persian keeps Vazirmatn; Latin/numerals fall to a large-x-height serif (e-reader style) */
+  font-family: 'Vazirmatn', Georgia, 'Noto Serif', serif;
   font-size: 18px;
   line-height: 1.8;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -271,6 +274,62 @@ body.eink-mode *::before,
 body.eink-mode *::after {
   transition: none !important;
   animation: none !important;
+}
+
+/* --- Full monochrome coverage — E-Ink is luminance-only, no colour may leak --- */
+body.eink-mode .screen,
+body.eink-mode .reading,
+body.eink-mode .reading__content {
+  background: var(--eink-bg) !important;
+  color: var(--eink-fg) !important;
+}
+
+/* Course filters → ink; active = inverted (was saffron) */
+body.eink-mode .btn--course {
+  background: var(--eink-bg) !important;
+  color: var(--eink-fg) !important;
+  border-color: var(--eink-border) !important;
+}
+body.eink-mode .btn--course-active {
+  background: var(--eink-fg) !important;
+  color: var(--eink-bg) !important;
+  border-color: var(--eink-fg) !important;
+}
+
+/* Search input → paper + ink */
+body.eink-mode .search-input {
+  background: var(--eink-bg) !important;
+  color: var(--eink-fg) !important;
+  border-color: var(--eink-border) !important;
+}
+body.eink-mode .search-input::placeholder { color: var(--eink-muted) !important; }
+
+/* Line icons follow ink via currentColor */
+body.eink-mode .icon { color: var(--eink-fg) !important; }
+
+/* Verify buttons → ink outline (no green/red/saffron) */
+body.eink-mode .btn--verify,
+body.eink-mode .btn--verify-correct,
+body.eink-mode .btn--verify-wrong {
+  background: var(--eink-bg) !important;
+  color: var(--eink-fg) !important;
+  border: 1px solid var(--eink-border) !important;
+}
+
+/* Headings + prompts → ink (were green) */
+body.eink-mode h1, body.eink-mode h2, body.eink-mode h3,
+body.eink-mode .article__title,
+body.eink-mode .verification__prompt { color: var(--eink-fg) !important; }
+
+/* The one allowed muted grey (still ≥7:1 on paper) */
+body.eink-mode .reading__placeholder,
+body.eink-mode .encounter__count { color: var(--eink-muted) !important; }
+
+/* QR share/scan buttons → ink on paper */
+body.eink-mode .hashtiyeh__qr-btn {
+  background: var(--eink-bg) !important;
+  color: var(--eink-fg) !important;
+  border-color: var(--eink-border) !important;
 }
 
 /* --- Print styles (similar to E-ink) --- */

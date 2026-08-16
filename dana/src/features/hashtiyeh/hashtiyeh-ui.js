@@ -9,6 +9,8 @@
  */
 
 import { Hashtiyeh } from './hashtiyeh.js';
+import { renderQR, startScan } from '../transfer/qr.js';
+import { icon, iconEl } from '../../core/icons.js';
 
 export class HashtiyehUI {
   constructor() {
@@ -47,8 +49,13 @@ export class HashtiyehUI {
       <div class="hashtiyeh">
         <div class="hashtiyeh__header">
           <h3 class="hashtiyeh__title">حاشیه‌نویسی</h3>
-          <span class="hashtiyeh__count">${annotations.length}</span>
+          <div class="hashtiyeh__hdr-actions">
+            <span class="hashtiyeh__count">${annotations.length}</span>
+            <button class="hashtiyeh__qr-btn" id="hashtiyeh-share-qr" aria-label="اشتراک با کد QR"></button>
+            <button class="hashtiyeh__qr-btn" id="hashtiyeh-scan-qr" aria-label="اسکن کد QR"></button>
+          </div>
         </div>
+        <div class="hashtiyeh__qr" id="hashtiyeh-qr" hidden></div>
 
         <div class="hashtiyeh__list" id="hashtiyeh-list">
           ${annotations.length === 0
@@ -71,13 +78,13 @@ export class HashtiyehUI {
           ></textarea>
           <div class="hashtiyeh__type-select">
             <button class="hashtiyeh__type-btn hashtiyeh__type-btn--active" data-type="note" aria-label="یادداشت">
-              📝 یادداشت
+              ${icon('note', { size: 14 })} یادداشت
             </button>
             <button class="hashtiyeh__type-btn" data-type="correction" aria-label="تصحیح">
-              ✏️ تصحیح
+              ${icon('edit', { size: 14 })} تصحیح
             </button>
             <button class="hashtiyeh__type-btn" data-type="question" aria-label="سوال">
-              ❓ سوال
+              ${icon('help', { size: 14 })} سوال
             </button>
           </div>
           <button class="btn btn--primary btn--sm" id="btn-add-annotation" disabled>
@@ -95,10 +102,10 @@ export class HashtiyehUI {
    */
   renderAnnotation(annotation) {
     const typeIcons = {
-      note: '📝',
-      correction: '✏️',
-      question: '❓',
-      link: '🔗',
+      note: icon('note', { size: 14 }),
+      correction: icon('edit', { size: 14 }),
+      question: icon('help', { size: 14 }),
+      link: icon('search', { size: 14 }),
     };
 
     const typeLabels = {
@@ -166,6 +173,12 @@ export class HashtiyehUI {
         this.deleteAnnotation(id);
       });
     });
+
+    // QR share / scan (offline device-to-device transfer)
+    const shareBtn = document.getElementById('hashtiyeh-share-qr');
+    const scanBtn = document.getElementById('hashtiyeh-scan-qr');
+    if (shareBtn) { shareBtn.replaceChildren(iconEl('qr', { size: 18 })); shareBtn.addEventListener('click', () => this.showQR()); }
+    if (scanBtn) { scanBtn.replaceChildren(iconEl('camera', { size: 18 })); scanBtn.addEventListener('click', () => this.showScanner()); }
 
     // Listen for text selection in the article
     document.addEventListener('mouseup', () => this.handleTextSelection());
@@ -240,6 +253,90 @@ export class HashtiyehUI {
   deleteAnnotation(annotationId) {
     this.engine.removeAnnotation(this.currentArticleId, annotationId);
     this.render();
+  }
+
+  // Compact payload for QR — short = fewer modules = easier scan on a cheap camera
+  compactPayload() {
+    const anns = this.engine.getAnnotations(this.currentArticleId);
+    return JSON.stringify({
+      v: 1,
+      a: this.currentArticleId,
+      n: anns.map((x) => ({ t: x.text, s: x.selectedText || '', y: x.type, au: x.author })),
+    });
+  }
+
+  // Show a QR of this article's annotations for another phone to scan.
+  async showQR() {
+    const box = document.getElementById('hashtiyeh-qr');
+    if (!box) return;
+    if (!box.hidden) { box.hidden = true; box.replaceChildren(); return; }
+    box.hidden = false;
+    box.replaceChildren();
+
+    if (this.engine.getAnnotations(this.currentArticleId).length === 0) {
+      box.appendChild(this.qrMessage('ابتدا یک حاشیه بنویس تا بتوانی آن را با QR به اشتراک بگذاری.'));
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    box.appendChild(canvas);
+    box.appendChild(this.qrMessage('این کد را با گوشی دیگر اسکن کن', 'hashtiyeh__qr-cap'));
+    try {
+      await renderQR(canvas, this.compactPayload(), { size: 240 });
+    } catch {
+      box.replaceChildren(this.qrMessage('حاشیه‌ها زیادند و در یک کد جا نمی‌شوند؛ از خروجی فایل استفاده کن.'));
+    }
+  }
+
+  // Open the camera to scan a friend's QR and import their annotations.
+  async showScanner() {
+    const box = document.getElementById('hashtiyeh-qr');
+    if (!box) return;
+    box.hidden = false;
+    box.replaceChildren();
+    const video = document.createElement('video');
+    video.className = 'hashtiyeh__qr-video';
+    box.appendChild(video);
+    box.appendChild(this.qrMessage('کد QR دوستت را مقابل دوربین بگیر', 'hashtiyeh__qr-cap'));
+    try {
+      this._stopScan = await startScan(video, (data) => {
+        const n = this.importCompact(data);
+        box.hidden = true;
+        box.replaceChildren();
+        this.render();
+        if (n > 0 && this.onAnnotationAdded) this.onAnnotationAdded();
+      });
+    } catch {
+      box.replaceChildren(this.qrMessage('دوربین در دسترس نیست. اجازهٔ دوربین را بده یا از خروجی فایل استفاده کن.'));
+    }
+  }
+
+  importCompact(dataStr) {
+    try {
+      const d = JSON.parse(dataStr);
+      if (!d || !Array.isArray(d.n)) return 0;
+      const overlay = {
+        format_version: 1,
+        base_article_id: this.currentArticleId,
+        annotations: d.n.map((x, i) => ({
+          id: `q_${Date.now()}_${i}`,
+          text: x.t,
+          selectedText: x.s || '',
+          type: x.y || 'note',
+          author: x.au || 'دوست',
+          timestamp: new Date().toISOString(),
+        })),
+      };
+      return this.engine.importOverlay(this.currentArticleId, JSON.stringify(overlay));
+    } catch {
+      return 0;
+    }
+  }
+
+  qrMessage(text, cls = 'hashtiyeh__empty') {
+    const p = document.createElement('p');
+    p.className = cls;
+    p.textContent = text;
+    return p;
   }
 
   /**
