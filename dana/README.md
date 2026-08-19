@@ -44,10 +44,11 @@ dana/
 │       ├── transfer/       # Local file transfer
 │       └── onboarding/     # Future Self quest
 ├── docs/                   # Documentation
-├── scripts/                # Build tooling
-├── MASTER_FOUNDATION_PROMPT.md  # Project constitution
-├── BUILD_GUIDE.md          # Engineering standards
-└── AGENT_PLAYBOOK.md       # AI workflow
+└── scripts/                # Build tooling
+
+# Agent workflow docs (MASTER_FOUNDATION_PROMPT.md, BUILD_GUIDE.md,
+# AGENT_PLAYBOOK.md) live in ../docs/internal/ at the repo root — kept
+# out of this tree since they're not part of the app itself.
 ```
 
 ## ZIM files
@@ -70,7 +71,7 @@ To use with real content:
 
 ## Safety
 
-This project operates under Class A (state threat) and Class B (child protection) safety models. See `MASTER_FOUNDATION_PROMPT.md` for full constraints.
+This project operates under Class A (state threat) and Class B (child protection) safety models. See [`../docs/internal/MASTER_FOUNDATION_PROMPT.md`](../docs/internal/MASTER_FOUNDATION_PROMPT.md) for full constraints.
 
 **No deployment to at-risk users from a hackathon prototype.**
 
