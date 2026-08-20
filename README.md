@@ -2,7 +2,11 @@
 
 **An Offline 3D Mind Palace for Persian Media Literacy**
 
-> Dana (دانا, "wise") is an offline app for children cut off by Iran's blackout, built as a walkable 3D Mind Palace. Children cross a Chahar Bagh, a Persian courtyard rendered in Three.js with girih tilework and muqarnas detail, light enough for a $100 Android phone with 2GB RAM. Six rooms hold six courses, opening a real Persian article and a scripted Jester who states confident false claims a child must catch. Everything runs offline after first load: no account, no server, no login.
+> Dana (دانا, "wise") is an offline education-game app for children cut off by Iran's blackout, built as a walkable 3D Mind Palace. Children cross a Chahar Bagh, a Persian courtyard rendered in Three.js with girih tilework and muqarnas detail. Making it light enough for an old $100 Android phone with 2GB RAM.
+
+> Six rooms hold six courses, each one its own interactive game or mission. Along with it, a chatbot with the persona of a  Jester who states confident false claims a child must catch. Everything runs offline after first load: no accounts or servers
+
+> P.s Watch out for which flower falls in the poet's hand after finishing the Zagros Door! 
 
 Status: Alpha prototype, working demo
 Offline PWA — live · Android APK — in progress
