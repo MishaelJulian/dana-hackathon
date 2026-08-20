@@ -11,7 +11,6 @@
 
 This document defines the workflow for AI coding agents working on the Dana project. It is read by:
 
-- Claude Code
 - Codex
 - Cursor
 - Gemini CLI

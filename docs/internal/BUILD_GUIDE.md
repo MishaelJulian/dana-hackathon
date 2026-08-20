@@ -103,7 +103,6 @@ dana/
 │
 ├── .cursorrules                 # Cursor-specific rules
 ├── .clinerules                  # Cline-specific rules
-├── CLAUDE.md                    # Claude Code project instructions
 ├── README.md
 └── LICENSE
 ```
