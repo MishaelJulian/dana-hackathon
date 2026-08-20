@@ -18,7 +18,7 @@ A high-contrast, monochrome mode built for right-to-left Persian text, on the lo
 
 ## 20: Palace / 3D
 
-![The Mind Palace — Alpha Stage](../assets/screenshots/palace.png)
+![The Mind Palace — Alpha Stage](../assets/screenshots/palace-2.png)
 
 *Dana's 3D Chahar Bagh courtyard, low-poly and instanced. Alpha Stage.*
 
