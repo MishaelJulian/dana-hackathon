@@ -103,7 +103,6 @@ dana/
 │
 ├── .cursorrules                 # Cursor-specific rules
 ├── .clinerules                  # Cline-specific rules
-├── AI_AGENT.md                    # an AI coding agent project instructions
 ├── README.md
 └── LICENSE
 ```

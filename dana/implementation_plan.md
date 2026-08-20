@@ -1,6 +1,6 @@
 # DANA PROJECT RECOVERY REPORT
 
-**Agent:** Antigravity (an AI model)
+**Agent:** Antigravity
 **Date:** 14 August 2026
 **Mode:** DISCOVERY — read-only audit, no files modified
 
@@ -485,7 +485,7 @@ This is the highest-leverage action because it restores the project's core promi
 ## Session: RECOVERY
 
 Date: 2026-08-14
-Agent: Antigravity (an AI model)
+Agent: Antigravity
 
 Sprint:
 Project Recovery — read-only audit

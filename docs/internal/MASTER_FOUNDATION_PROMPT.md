@@ -12,7 +12,7 @@
 
 **How to use this document:**
 
-Paste this entire file at the top of a fresh AI chat (an AI assistant, Cursor, Codex, Gemini CLI, Cline, Roo Code, or any system that accepts system prompts). It is the single source of truth for every AI agent working on this project. Do not paste partial sections. Do not paste individual spec files without this manual above them.
+Paste this entire file at the top of a fresh AI chat (Cursor, Codex, Gemini CLI, Cline, Roo Code, or any system that accepts system prompts). It is the single source of truth for every AI agent working on this project. Do not paste partial sections. Do not paste individual spec files without this manual above them.
 
 This manual supersedes `PARDIS_PROMPT_ENGINE.md` for all new sessions. The Prompt Engine remains the operational paste-in for rapid task-specific work; this manual is the constitutional layer above it.
 
@@ -422,7 +422,7 @@ When introducing external facts (stats, protocol behaviour, cultural claims):
 4. **Vendor and project self-claims are NOT evidence of efficacy.** Label them "vendor-reported" and say so explicitly.
 5. **Prefer sources authored by people from the region** over outside commentary where both exist.
 
-Published own research found agents drift toward content farms unless told not to. Do not drift.
+Published research found agents drift toward content farms unless told not to. Do not drift.
 
 ## 18. Paste recipes
 
