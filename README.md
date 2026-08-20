@@ -14,7 +14,7 @@ Live demo:
 
 | | |
 |---|---|
-| ![The Mind Palace — Alpha Stage](assets/screenshots/palace.png) | ![E-ink reading mode — Alpha Stage](assets/screenshots/reading.png) |
+| ![The Mind Palace — Alpha Stage](assets/screenshots/palace-2.png) | ![E-ink reading mode — Alpha Stage](assets/screenshots/article.png) |
 | *Chahar Bagh courtyard — Alpha Stage* | *E-ink reading mode — Alpha Stage* |
 
 ## Quick start
