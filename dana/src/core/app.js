@@ -322,6 +322,8 @@ class DanaApp {
 
     if (this.hashtiyeh.isOpen && this.currentArticle) {
       this.hashtiyeh.setArticle(this.currentArticle.id);
+    } else {
+      this.hashtiyeh.stopScan(); // closing the panel must release the camera
     }
   }
 

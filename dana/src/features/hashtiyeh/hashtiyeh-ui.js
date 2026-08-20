@@ -39,9 +39,16 @@ export class HashtiyehUI {
   /**
    * Render the marginalia panel
    */
+  // Stop any running camera scan. Idempotent — safe to call on close / re-render / share.
+  stopScan() {
+    try { this._stopScan?.(); } catch { /* stream already gone */ }
+    this._stopScan = null;
+  }
+
   render() {
     const container = document.getElementById('hashtiyeh-panel');
     if (!container || !this.currentArticleId) return;
+    this.stopScan(); // article switch / re-render must not leak the camera
 
     const annotations = this.engine.getAnnotations(this.currentArticleId);
 
